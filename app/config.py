@@ -1,6 +1,23 @@
 # app/config.py
 
-import os # 导入 os 模块
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+COMMON_HEADERS = {
+    'accept': '*/*',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'origin': 'https://zoom.earth',
+    'referer': 'https://zoom.earth/',
+    'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+}
 
 # --- 1. 定义所有可用数据源的配置 ---
 DATA_SOURCES = {
@@ -37,7 +54,7 @@ print(f"--- 系统已启动，当前使用的数据源: {ACTIVE_CONFIG['display_
 
 
 # --- 通用配置 ---
-ZOOM_LEVEL = 9
+ZOOM_LEVEL = 7
 TARGET_AREA = {
     "north": 31.532,
     "south": 28.960,

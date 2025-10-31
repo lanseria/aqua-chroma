@@ -62,7 +62,7 @@ def scheduled_analysis_task():
     timestamps_url = config.ACTIVE_CONFIG["timestamps_url"]
     try:
         print(f"[调度任务] 正在从 {timestamps_url} 获取时间戳列表...")
-        response = requests.get(timestamps_url)
+        response = requests.get(timestamps_url, headers=config.COMMON_HEADERS)
         response.raise_for_status()
         data = response.json()
 
@@ -139,6 +139,31 @@ def get_results():
         return []
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="结果文件格式错误。")
+
+@app.post("/debug/analyze/{timestamp}", tags=["Debugging"])
+async def debug_analyze_by_timestamp(timestamp: int):
+    """
+    接收一个时间戳，立即执行一次完整的分析流程，用于测试和调试。
+    
+    - **注意**: 此端点的分析结果【不会】被保存到最终的 results.json 文件中。
+    - 它会生成并覆盖对应时间戳的调试图片。
+    - 直接返回本次分析的详细结果。
+    """
+    print(f"\n>>> [调试接口] 收到对时间戳 {timestamp} 的手动分析请求...")
+    
+    # 我们直接复用已有的核心分析函数
+    result = run_analysis_for_timestamp(timestamp)
+    
+    if result:
+        print(f">>> [调试接口] 时间戳 {timestamp} 分析完成。")
+        return result
+    else:
+        # 如果 run_analysis_for_timestamp 返回 None (例如下载失败)
+        print(f">>> [调试接口] 时间戳 {timestamp} 分析失败或无数据。")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"无法为时间戳 {timestamp} 生成分析结果。可能原因：下载失败、无数据或处理过程中发生错误。"
+        )
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):

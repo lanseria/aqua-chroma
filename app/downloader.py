@@ -28,7 +28,6 @@ def latlon_to_pixel_on_stitched(lat: float, lon: float, zoom: int, x_tile_min: i
     local_pixel_y = int(round(world_pixel_y - offset_y))
     return local_pixel_x, local_pixel_y
 
-# --- 修改 download_stitched_image 函数 ---
 def download_stitched_image(timestamp: int) -> Optional[Image.Image]:
     zoom = config.ZOOM_LEVEL
     bounds = config.TARGET_AREA
@@ -54,12 +53,13 @@ def download_stitched_image(timestamp: int) -> Optional[Image.Image]:
                 dt_object = datetime.fromtimestamp(timestamp, tz=timezone.utc)
                 date_str = dt_object.strftime('%Y-%m-%d')
                 time_str = dt_object.strftime('%H%M')
+                # https://tiles.zoom.earth/geocolor/himawari/2025-10-31/2330/6/29/49.jpg
                 tile_url = tile_template.format(date_str=date_str, time_str=time_str, zoom=zoom, y=y, x=x)
             else: # 默认为 "LOCAL_SERVER" 或其他类似格式
                 tile_url = tile_template.format(timestamp=timestamp, zoom=zoom, y=y, x=x)
-            
+            print(f"正在下载 {tile_url}...")
             try:
-                res = requests.get(tile_url, timeout=5)
+                res = requests.get(tile_url, timeout=5, headers=config.COMMON_HEADERS)
                 if res.status_code == 200:
                     tile_image = Image.open(BytesIO(res.content))
                     stitched_image.paste(tile_image, (j * tile_size, i * tile_size))
