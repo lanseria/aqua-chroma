@@ -1,14 +1,12 @@
 services:
   app:
+    build: .
     image: aqua-chroma
     container_name: aqua-chroma-app
     restart: unless-stopped
     ports:
       - "8010:8000"
     volumes:
-      - aquq-data:/app/data
+      - ./data:/app/data
     env_file:
       - .env
-
-volumes:
-  aquq-data:

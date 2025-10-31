@@ -1,9 +1,10 @@
-FROM m.daocloud.io/ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# 使用官方的 uv 基础镜像
+FROM m.daocloud.io/ghcr.io/astral-sh/uv:python3.13-bookworm
 
 # 设置容器内的工作目录
 WORKDIR /app
 
-# --- 1. 配置 APT 镜像源  ---
+# --- 1. 配置 APT 镜像源 ---
 RUN echo "\
 Types: deb\n\
 URIs: https://mirrors.tuna.tsinghua.edu.cn/debian/\n\
@@ -12,48 +13,57 @@ Components: main contrib non-free non-free-firmware\n\
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\
 " > /etc/apt/sources.list.d/debian.sources
 
-# --- 关键修复 2: 创建用户时，为其指定一个有效的主目录 ---
-# 使用 --home /app 将用户的主目录设置为工作目录 /app
-
-# 更新 apt 包列表并安装 cartopy 等库可能需要的系统依赖
+# --- 2. 安装系统依赖 ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    # --- Geospatial Libraries (for rasterio, shapely) ---
+    libgdal-dev \
     libgeos-dev \
-    tzdata \
-    build-essential \
+    # --- OpenCV Dependencies ---
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    # --- Other System Dependencies ---
     libeccodes-dev \
+    tzdata \
+    # 清理APT缓存以减小镜像体积
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 设置环境变量
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    UV_LINK_MODE=copy \
-# Enable bytecode compilation
+# --- 3. 创建一个非 root 用户 ---
+RUN useradd --create-home --home-dir /app --shell /bin/bash appuser
+
+# --- 4. 设置环境变量 (已修正) ---
+ENV \
+    # 新增：将项目根目录添加到Python的模块搜索路径中
+    PYTHONPATH=/app \
+    # --- 其他环境变量保持不变 ---
     UV_COMPILE_BYTECODE=1 \
-# Copy from the cache instead of linking since it's a mounted volume
+    UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1 \
-    HOME=/app
-# Ensure installed tools can be executed out of the box
+    HOME=/app \
     UV_TOOL_BIN_DIR=/usr/local/bin
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-
-# 安装 Python 依赖
-COPY . /app
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# 声明容器运行时监听的端口
-EXPOSE 8000
+# --- 5. 依赖安装流程 ---
+COPY pyproject.toml uv.lock ./
 
-# --- 新增: 为数据和输出目录声明卷 ---
-# 这明确表示这些目录用于存储持久化数据
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev && \
+    chown -R appuser:appuser /app
+
+# 切换到非 root 用户
+USER appuser
+
+# 拷贝整个项目代码
+COPY --chown=appuser:appuser . .
+
+# 声明端口和卷
+EXPOSE 8000
 VOLUME /app/data
 
-# 容器启动时运行的命令
+# 临时修改：使用此入口点进行调试，以查看确切的导入错误
+# ENTRYPOINT ["python", "-c", "import app.main"]
+
+# 原始入口点 (暂时注释掉)
 ENTRYPOINT ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
