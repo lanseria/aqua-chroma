@@ -26,3 +26,6 @@ CLOUD_THRESHOLD = 144      # 判断为云的像素亮度阈值 (0-255)
 THICK_CLOUD_COVERAGE = 0.7 # 浓云覆盖率阈值 (70%)
 BLUE_LOWER_BOUND = [100, 40, 20] # 蓝色HSV下限
 BLUE_UPPER_BOUND = [140, 255, 255] # 蓝色HSV上限
+
+RESULTS_JSON_PATH = "data/analysis_results.json"
+TIMESTAMPS_URL = f"{GIS_SERVER_URL}/himawari/timestamps.json"

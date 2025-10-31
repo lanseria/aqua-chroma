@@ -1,0 +1,26 @@
+<!-- templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aqua-Chroma Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Aqua-Chroma 海洋颜色实时监控</h1>
+        <div id="status">正在加载最新数据...</div>
+    </header>
+    
+    <main id="results-container" class="grid-container">
+        <!-- JavaScript将在这里动态插入分析结果卡片 -->
+    </main>
+
+    <!-- 新增：加载动画指示器 -->
+    <div id="loader" class="loader hidden"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
