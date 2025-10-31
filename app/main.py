@@ -101,13 +101,27 @@ def scheduled_analysis_task():
     print(">>> [调度任务] 本轮所有新时间戳处理完毕。")
 
 scheduler = AsyncIOScheduler()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 应用启动时
     print("应用启动，添加并启动定时任务...")
+
+    # 1. 直接手动调用任务函数，实现“启动时立即执行一次”
+    print("--- 正在执行首次启动任务 ---")
+    scheduled_analysis_task()
+    print("--- 首次启动任务执行完毕 ---")
+
+    # 2. 添加定时任务，用于未来的周期性执行
     scheduler.add_job(scheduled_analysis_task, 'interval', minutes=10, id="main_task")
-    scheduler.trigger_job("main_task")
+
+    # 3. 启动调度器
     scheduler.start()
+
+    # --- 以下是FastAPI生命周期管理的标准代码 ---
     yield
+
+    # 应用关闭时
     print("应用关闭，停止定时任务...")
     scheduler.shutdown()
 
