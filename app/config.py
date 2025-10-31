@@ -18,8 +18,8 @@ GEOJSON_PATH = "data/geojson/china.geojson"
 
 # --- 时间配置 ---
 TIME_ZONE = "Asia/Shanghai"  # 设置当地时区
-NIGHT_START_HOUR = 18  # 定义黑夜开始的小时
-NIGHT_END_HOUR = 6     # 定义黑夜结束的小时
+NIGHT_START_HOUR = 17  # 定义黑夜开始的小时
+NIGHT_END_HOUR = 7     # 定义黑夜结束的小时
 
 # --- 图像分析参数 ---
 CLOUD_THRESHOLD = 144      # 判断为云的像素亮度阈值 (0-255)
