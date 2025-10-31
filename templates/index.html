@@ -7,10 +7,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aqua-Chroma Monitor</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- 新增：引入 ECharts 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 </head>
 <body>
     <header>
         <h1>Aqua-Chroma 海洋颜色实时监控</h1>
+        <!-- 新增：ECharts 图表容器 -->
+        <div id="echarts-container"></div>
         <div id="status">正在加载最新数据...</div>
     </header>
     
@@ -18,7 +22,6 @@
         <!-- JavaScript将在这里动态插入分析结果卡片 -->
     </main>
 
-    <!-- 新增：加载动画指示器 -->
     <div id="loader" class="loader hidden"></div>
 
     <script src="/static/script.js"></script>

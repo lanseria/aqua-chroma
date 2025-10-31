@@ -1,26 +1,74 @@
 // static/script.js
 
 document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM 元素获取 ---
     const container = document.getElementById('results-container');
     const statusDiv = document.getElementById('status');
     const loader = document.getElementById('loader');
+    const chartDom = document.getElementById('echarts-container');
 
-    // --- 状态管理变量 ---
-    let allData = []; // 存储从API获取的所有数据
-    let currentIndex = 0; // 追踪当前已渲染到哪条数据
-    const itemsPerPage = 12; // 每次加载的数量
-    let isLoading = false; // 防止滚动时重复加载的标志
+    // --- 状态管理 ---
+    let allData = [];
+    let currentIndex = 0;
+    const itemsPerPage = 12;
+    let isLoading = false;
+    let myChart = echarts.init(chartDom, 'dark'); // 初始化 ECharts 实例
 
-    // --- 渲染函数 ---
-    // 负责将一小批数据显示在页面上
+    // --- 辅助函数：根据百分比获取颜色 ---
+    const getBluenessColor = (p) => {
+        if (p < 20) return '#8c6b4f'; // 浑浊的棕色
+        if (p < 50) return '#6495ED'; // 矢车菊蓝
+        if (p < 80) return '#00BFFF'; // 深天蓝
+        return '#1E90FF';   // 道奇蓝
+    };
+
+    const getCloudColor = (p) => {
+        if (p < 20) return '#ADD8E6'; // 浅蓝色 (晴朗)
+        if (p < 50) return '#D3D3D3'; // 浅灰色 (少云)
+        if (p < 80) return '#A9A9A9'; // 深灰色 (多云)
+        return '#696969';   // 暗灰色 (阴天)
+    };
+
+    // --- ECharts 渲染函数 ---
+    const renderChart = (data) => {
+        const chartData = data
+            .filter(item => item.result && item.result['海蓝程度']) // 过滤掉无效数据
+            .map(item => {
+                const timestamp = new Date(item.timestamp * 1000);
+                const blueness = parseFloat(item.result['海蓝程度']) || 0;
+                return [timestamp, blueness];
+            });
+
+        const option = {
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'time', boundaryGap: false },
+            yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value} %' } },
+            series: [{
+                name: '海蓝程度',
+                type: 'line',
+                smooth: true,
+                symbol: 'none',
+                data: chartData,
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
+                        offset: 0, color: 'rgba(30, 144, 255, 0.5)'
+                    }, {
+                        offset: 1, color: 'rgba(30, 144, 255, 0)'
+                    }])
+                }
+            }]
+        };
+        myChart.setOption(option);
+    };
+
+    // --- 卡片渲染函数 (已更新) ---
     const renderItems = () => {
-        // 如果所有数据都已加载，则隐藏加载动画并停止
         if (currentIndex >= allData.length) {
             loader.classList.add('hidden');
             return;
         }
-
-        // 获取下一批要渲染的数据
         const itemsToRender = allData.slice(currentIndex, currentIndex + itemsPerPage);
         
         itemsToRender.forEach(item => {
@@ -28,16 +76,36 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = 'result-card';
             const formattedDate = new Date(item.timestamp * 1000).toLocaleString('zh-CN', { hour12: false });
-            const seaBlue = result['海蓝程度'] || 'N/A';
-            const cloudCover = result['云层覆盖率'] || 'N/A';
+            
+            const bluenessPercent = parseFloat(result['海蓝程度']) || 0;
+            const cloudPercent = parseFloat(result['云层覆盖率']) || 0;
 
-            // 使用模板字符串构建卡片内容
             card.innerHTML = `
                 <div class="card-header"><h2>${formattedDate}</h2></div>
                 <div class="card-body">
                     <p>状态: <span class="value">${result.status}</span></p>
-                    <p>海蓝程度: <span class="value">${seaBlue}</span></p>
-                    <p>云层覆盖率: <span class="value">${cloudCover}</span></p>
+                    
+                    <!-- 海蓝程度进度条 -->
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>海蓝程度</span>
+                            <span>${bluenessPercent.toFixed(2)}%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" data-width="${bluenessPercent}%" style="background-color: ${getBluenessColor(bluenessPercent)};"></div>
+                        </div>
+                    </div>
+
+                    <!-- 云层覆盖率进度条 -->
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>云层覆盖率</span>
+                            <span>${cloudPercent.toFixed(2)}%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" data-width="${cloudPercent}%" style="background-color: ${getCloudColor(cloudPercent)};"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="image-gallery">
                     <figure>
@@ -53,51 +121,50 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(card);
         });
 
-        // 更新索引
+        // 延迟一小段时间再设置宽度，以触发CSS动画
+        setTimeout(() => {
+            const newFills = container.querySelectorAll('.progress-bar-fill:not(.animated)');
+            newFills.forEach(fill => {
+                fill.style.width = fill.getAttribute('data-width');
+                fill.classList.add('animated');
+            });
+        }, 100);
+
         currentIndex += itemsPerPage;
     };
 
-    // --- 滚动事件处理函数 ---
+    // --- 滚动和初始化逻辑 (保持不变) ---
     const handleScroll = () => {
-        // 如果正在加载或所有数据都已加载完毕，则不执行任何操作
-        if (isLoading || currentIndex >= allData.length) {
-            return;
-        }
-
-        // 判断是否滚动到页面底部（留出300像素的缓冲）
+        if (isLoading || currentIndex >= allData.length) return;
         if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 300) {
             isLoading = true;
-            loader.classList.remove('hidden'); // 显示加载动画
-
-            // 模拟网络延迟，让加载动画可见，提升用户体验
+            loader.classList.remove('hidden');
             setTimeout(() => {
                 renderItems();
-                isLoading = false; // 加载完成，重置标志
+                isLoading = false;
             }, 500);
         }
     };
 
-    // --- 初始化函数 ---
     const init = async () => {
         try {
             const response = await fetch('/results');
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             
             const data = await response.json();
-            
             if (data.length === 0) {
                 statusDiv.textContent = '暂无分析数据，请等待后台任务执行...';
                 return;
             }
 
-            // 将数据倒序（最新的在最前）并存储到全局变量
+            // 【重要】先用原始顺序数据渲染图表
+            renderChart(data);
+
+            // 然后再倒序数据用于卡片展示
             allData = data.reverse();
             statusDiv.textContent = `共加载 ${allData.length} 条记录。向下滚动以查看更多。`;
             
-            // 渲染首屏数据
             renderItems();
-
-            // 监听滚动事件
             window.addEventListener('scroll', handleScroll);
 
         } catch (error) {
@@ -105,6 +172,11 @@ document.addEventListener('DOMContentLoaded', () => {
             statusDiv.textContent = '获取数据失败，请检查后端服务是否正常。';
         }
     };
+
+    // 监听窗口大小变化，使图表自适应
+    window.addEventListener('resize', () => {
+        myChart.resize();
+    });
 
     // 启动应用
     init();
