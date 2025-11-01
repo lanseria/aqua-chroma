@@ -61,7 +61,7 @@ TARGET_AREA = {
     "west": 121.333,
     "east": 123.431
 }
-GEOJSON_PATH = "data/geojson/china.geojson"
+GEOJSON_PATH = "geojson/china.geojson"
 TIME_ZONE = "Asia/Shanghai"
 NIGHT_START_HOUR = 18
 NIGHT_END_HOUR = 6

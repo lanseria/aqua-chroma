@@ -1,4 +1,4 @@
 data/output
 __pycache__
-data/analysis_results.json
+data
 .DS_Store
