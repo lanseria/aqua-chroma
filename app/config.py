@@ -5,6 +5,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- Database Configuration ---
+DB_USER = os.getenv("DB_USER", "user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "aqua_chroma")
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
 COMMON_HEADERS = {
     'accept': '*/*',
     'accept-language': 'zh-CN,zh;q=0.9',
@@ -69,4 +77,5 @@ CLOUD_THRESHOLD = 200
 THICK_CLOUD_COVERAGE = 0.7
 BLUE_LOWER_BOUND = [100, 40, 20]
 BLUE_UPPER_BOUND = [140, 255, 255]
-RESULTS_JSON_PATH = "data/analysis_results.json"
+# --- 定义调试图片的基准输出目录 ---
+OUTPUT_BASE_DIR = "data/output"

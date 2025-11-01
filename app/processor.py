@@ -40,7 +40,7 @@ def analyze_ocean_color(image_array: np.ndarray, output_dir: str) -> Dict[str, A
     cloud_coverage = cloud_pixels / total_pixels
     
     if cloud_coverage > config.THICK_CLOUD_COVERAGE:
-        return {"status": "云层过厚", "details": f"云层覆盖率: {cloud_coverage:.2%}"}
+        return {"status": "云层过厚", "details": f"cloud_coverage: {cloud_coverage:.2%}"}
 
     # 4. 移除稀薄云层并计算海蓝程度
     ocean_mask = gray_image > 0
@@ -75,7 +75,7 @@ def analyze_ocean_color(image_array: np.ndarray, output_dir: str) -> Dict[str, A
     blueness_ratio = blue_pixel_count / cloud_free_pixel_count
     
     return {
-        "status": "计算完成",
-        "海蓝程度": f"{blueness_ratio:.2%}",
-        "云层覆盖率": f"{cloud_coverage:.2%}"
+        "status": "completed", # 使用英文状态
+        "seaBlueness": blueness_ratio, # 使用英文键名和原始浮点数
+        "cloudCoverage": cloud_coverage # 使用英文键名和原始浮点数
     }

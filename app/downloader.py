@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import requests
 from PIL import Image
+from zoneinfo import ZoneInfo
 
 from . import config
 
@@ -50,9 +51,12 @@ def download_stitched_image(timestamp: int) -> Optional[Image.Image]:
             # 2. 根据当前激活的数据源，动态构建URL
             if config.ACTIVE_DATA_SOURCE == "ZOOM_EARTH":
                 # 对于Zoom.earth，需要将时间戳转换为 YYYY-MM-DD 和 HHMM 格式
-                dt_object = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                date_str = dt_object.strftime('%Y-%m-%d')
-                time_str = dt_object.strftime('%H%M')
+                # 1. 获取本地时区对象
+                local_tz = ZoneInfo(config.TIME_ZONE)
+                dt_local = datetime.fromtimestamp(timestamp, tz=local_tz)
+                dt_utc = dt_local.astimezone(timezone.utc)
+                date_str = dt_utc.strftime('%Y-%m-%d')
+                time_str = dt_utc.strftime('%H%M')
                 # https://tiles.zoom.earth/geocolor/himawari/2025-10-31/2330/6/29/49.jpg
                 tile_url = tile_template.format(date_str=date_str, time_str=time_str, zoom=zoom, y=y, x=x)
             else: # 默认为 "LOCAL_SERVER" 或其他类似格式
