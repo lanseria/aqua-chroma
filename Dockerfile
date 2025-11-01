@@ -29,9 +29,6 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# --- 3. 创建一个非 root 用户 ---
-RUN useradd --create-home --home-dir /app --shell /bin/bash appuser
-
 # --- 4. 设置环境变量 (已修正) ---
 ENV \
     # 新增：将项目根目录添加到Python的模块搜索路径中
@@ -49,14 +46,11 @@ ENV PATH="/app/.venv/bin:$PATH"
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev && \
-    chown -R appuser:appuser /app
+    uv sync --locked --no-dev
 
-# 切换到非 root 用户
-USER appuser
 
 # 拷贝整个项目代码
-COPY --chown=appuser:appuser . .
+COPY . .
 
 # 声明端口和卷
 EXPOSE 8000
