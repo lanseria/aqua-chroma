@@ -7,6 +7,9 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      - ./data:/app/data
+      - aqua-chroma-data:/app/data
     env_file:
       - .env
+
+volumes:
+  aqua-chroma-data:
