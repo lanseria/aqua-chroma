@@ -64,10 +64,10 @@ print(f"--- 系统已启动，当前使用的数据源: {ACTIVE_CONFIG['display_
 # --- 通用配置 ---
 ZOOM_LEVEL = 7
 TARGET_AREA = {
-    "north": 31.532,
-    "south": 28.960,
-    "west": 121.333,
-    "east": 123.431
+    "north": 31.168,
+    "south": 29.609,
+    "west": 121.102,
+    "east": 122.871
 }
 GEOJSON_PATH = "geojson/china.geojson"
 TIME_ZONE = "Asia/Shanghai"

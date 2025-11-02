@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
+import cv2
 import numpy as np
 import requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -75,13 +76,27 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
     else:
         stitched_image = downloader.download_stitched_image(timestamp)
         if stitched_image is None:
-            return None # 下载失败则中止
+            return None  # 下载失败则中止
 
+        # --- 步骤 1: 保存原始下载图 ---
         raw_image_path = output_dir_path / "01_downloaded_cropped.png"
         stitched_image.save(raw_image_path)
 
+        # --- 新增步骤 2: 对图像进行去雾处理 ---
+        # 2.1 将 PIL Image 转换为 OpenCV BGR 格式
+        image_bgr = cv2.cvtColor(np.array(stitched_image), cv2.COLOR_RGB2BGR)
+        # 2.2 调用去雾函数
+        dehazed_image_bgr = processor.dehaze_dark_channel(image_bgr)
+        # 2.3 将处理后的 BGR 图像转回 PIL RGB 格式，用于后续流程和保存
+        dehazed_image_pil = Image.fromarray(cv2.cvtColor(dehazed_image_bgr, cv2.COLOR_BGR2RGB))
+        # 2.4 保存去雾后的图像以供调试
+        dehazed_image_path = output_dir_path / "01a_dehazed.png"
+        dehazed_image_pil.save(dehazed_image_path)
+        
+        # --- 后续流程使用去雾后的图像 ---
         try:
-            image_array = np.array(stitched_image)
+            # 使用 dehazed_image_pil 替代 stitched_image
+            image_array = np.array(dehazed_image_pil) 
             ocean_mask = geo_utils.create_ocean_mask(
                 image_shape=image_array.shape,
                 geojson_path=config.GEOJSON_PATH,
@@ -90,11 +105,13 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
             mask_path = output_dir_path / "02_generated_mask.png"
             Image.fromarray(ocean_mask).save(mask_path)
             
-            ocean_only_image_array = geo_utils.apply_mask(stitched_image, ocean_mask)
+            # 使用 dehazed_image_pil 替代 stitched_image
+            ocean_only_image_array = geo_utils.apply_mask(dehazed_image_pil, ocean_mask)
             masked_image_path = output_dir_path / "03_ocean_only.png"
             Image.fromarray(ocean_only_image_array).save(masked_image_path)
             
-            analysis_result = processor.analyze_ocean_color(np.array(stitched_image), str(output_dir_path))
+            # 分析函数接收的也是去雾后的图像
+            analysis_result = processor.analyze_ocean_color(np.array(dehazed_image_pil), str(output_dir_path))
             analysis_data.update({
                 "status": analysis_result.get("status", "error"),
                 "sea_blueness": analysis_result.get("seaBlueness"),
