@@ -50,7 +50,7 @@ DATA_SOURCES = {
 # ##   如果环境变量未设置，将使用下面的 'default' 值。         ##
 # ##                                                         ##
 # #############################################################
-ACTIVE_DATA_SOURCE = os.getenv("ACTIVE_DATA_SOURCE", default="LOCAL_SERVER")
+ACTIVE_DATA_SOURCE = os.getenv("ACTIVE_DATA_SOURCE", default="ZOOM_EARTH")
 
 
 # --- 3. 根据激活的源，自动加载配置 ---
