@@ -166,7 +166,8 @@ uvicorn app.main:app --reload
 ├── docker-compose.yml    # Docker Compose 配置文件
 ├── Dockerfile            # Docker 镜像构建文件
 ├── pyproject.toml        # Python 项目定义与依赖
-└── README.md             # 项目说明文档```
+└── README.md             # 项目说明文档
+```
 
 ---
 
