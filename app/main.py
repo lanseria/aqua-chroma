@@ -131,15 +131,22 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
 
     # --- 持久化过程 ---
     result_to_persist = schemas.AnalysisResultCreate(**analysis_data)
-    crud.upsert_analysis_result(db, result_data=result_to_persist)
+    db_record = crud.upsert_analysis_result(db, result_data=result_to_persist)
     print(f"[{timestamp}] Data for timestamp has been upserted to the database.")
     
-    # --- 返回包含所有细节的完整结果给API ---
-    final_response = {
-        **analysis_data, 
-        **analysis_result,
-        "output_directory": output_dir_web_format
-    }
+    # --- 准备API响应，确保无重复字段且使用驼峰命名 ---
+    # 1. 以 processor 返回的详细结果为基础 (已经是驼峰命名)
+    final_response = analysis_result.copy()
+    
+    # 2. 从数据库记录中获取 id 和最终确认的 status
+    #    这样可以确保即使 analysis_result 出错，status 也是准确的
+    final_response['id'] = db_record.id
+    final_response['status'] = db_record.status
+    final_response['timestamp'] = db_record.timestamp
+
+    # 3. 添加动态生成的路径
+    final_response["output_directory"] = output_dir_web_format
+    
     return final_response
 
 # =================================================================
