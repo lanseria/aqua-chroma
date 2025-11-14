@@ -85,6 +85,8 @@ CLOUD_CLUSTER_SATURATION_MAX = 50
 CLOUD_CLUSTER_VALUE_MIN = 100
 # 用于在剩下的非云簇中识别“蓝色水体”簇。Hue(H)值大于此阈值的被认为是蓝色。
 BLUE_CLUSTER_HUE_THRESHOLD = 80
+# 二次云/雾识别阈值：在第一轮识别后，若某个簇的饱和度低于此值，也将其视为云/雾。
+CLOUD_SECONDARY_SATURATION_THRESHOLD = 32
 
 
 # --- 定义调试图片的基准输出目录 ---

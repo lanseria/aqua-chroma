@@ -36,57 +36,71 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     pixels_float = np.float32(ocean_pixels)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
     _, labels, centers_rgb = cv2.kmeans(
-        pixels_float, config.K_MEANS_CLUSTERS, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+        pixels_float, config.K_MEANS_CLUSTERS, None, criteria, 10, cv2.KMEANS_PP_CENTERS
     )
     centers_rgb = np.uint8(centers_rgb)
     centers_hsv = cv2.cvtColor(centers_rgb.reshape(1, -1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
 
-    # --- 5. 智能识别 + 详细打印 (新版) ---
+    # --- 5. 智能识别 + 详细打印 (V3版，带二次云/雾识别) ---
     print("\n--- [Processor] K-Means Cluster Analysis ---")
-    blue_label, yellow_label, cloud_label = -1, -1, -1
     
-    # 创建一个身份列表，用于追踪每个簇的识别结果
+    # 使用列表来存储标签，以应对多个云簇的情况
+    blue_labels, yellow_labels, cloud_labels = [], [], []
     identities = ["Undetermined"] * config.K_MEANS_CLUSTERS
     unassigned_labels = list(range(config.K_MEANS_CLUSTERS))
 
-    # 5.1 第一轮：识别云/白沫
-    for i in unassigned_labels[:]: # 使用副本进行迭代，以便安全地修改原列表
+    # 5.1 第一轮：识别明亮的云/白沫 (Primary Cloud)
+    for i in unassigned_labels[:]:
         s, v = centers_hsv[i][1], centers_hsv[i][2]
         if s < config.CLOUD_CLUSTER_SATURATION_MAX and v > config.CLOUD_CLUSTER_VALUE_MIN:
-            cloud_label = i
-            identities[i] = "Cloud/White"
+            cloud_labels.append(i)
+            identities[i] = "Cloud (Primary)"
             unassigned_labels.remove(i)
-            break # 通常只有一个云簇，找到就跳出
+            break 
 
-    # 5.2 第二轮：在剩下的簇中识别蓝水
+    # 5.2 第二轮：识别低饱和度的云/雾 (Secondary Cloud/Fog)
+    for i in unassigned_labels[:]:
+        s = centers_hsv[i][1]
+        if s < config.CLOUD_SECONDARY_SATURATION_THRESHOLD:
+            cloud_labels.append(i)
+            identities[i] = "Cloud (Secondary/Fog)"
+            unassigned_labels.remove(i)
+
+    # 5.3 第三轮：在剩下的簇中识别蓝水
     for i in unassigned_labels[:]:
         h = centers_hsv[i][0]
         if h > config.BLUE_CLUSTER_HUE_THRESHOLD:
-            blue_label = i
+            blue_labels.append(i)
             identities[i] = "Blue Water"
             unassigned_labels.remove(i)
-            break # 通常只有一个蓝水簇
+            break 
 
-    # 5.3 第三轮：剩下的最后一个簇被认为是黄水
-    if len(unassigned_labels) == 1:
-        yellow_label = unassigned_labels[0]
-        identities[yellow_label] = "Yellow Water"
+    # 5.4 第四轮：最后剩下的都归为黄水
+    if unassigned_labels:
+        yellow_labels.extend(unassigned_labels)
+        for i in unassigned_labels:
+            identities[i] = "Yellow Water"
 
-    # 5.4 打印最终识别结果
+    # 5.5 打印最终识别结果
     for i in range(config.K_MEANS_CLUSTERS):
         print(f"  - Cluster {i}: RGB={centers_rgb[i]}, HSV={centers_hsv[i]} -> Identified as: {identities[i]}")
 
 
-    # --- 6. 统计各类像素数量 + 详细打印 ---
+    # --- 6. 统计各类像素数量 (新版，基于标签列表) + 详细打印 ---
     pixel_counts = np.bincount(labels.flatten())
-    blue_pixels = int(pixel_counts[blue_label]) if blue_label != -1 and blue_label < len(pixel_counts) else 0
-    yellow_pixels = int(pixel_counts[yellow_label]) if yellow_label != -1 and yellow_label < len(pixel_counts) else 0
-    cloud_pixels = int(pixel_counts[cloud_label]) if cloud_label != -1 and cloud_label < len(pixel_counts) else 0
+    
+    # 辅助函数，确保标签在像素统计范围内
+    def count_pixels_for_labels(label_list):
+        return sum(int(pixel_counts[l]) for l in label_list if l < len(pixel_counts))
+
+    blue_pixels = count_pixels_for_labels(blue_labels)
+    yellow_pixels = count_pixels_for_labels(yellow_labels)
+    cloud_pixels = count_pixels_for_labels(cloud_labels)
 
     print("\n--- [Processor] Pixel Count Summary ---")
-    print(f"  - Blue Pixels   : {blue_pixels} (Label: {blue_label})")
-    print(f"  - Yellow Pixels : {yellow_pixels} (Label: {yellow_label})")
-    print(f"  - Cloud Pixels  : {cloud_pixels} (Label: {cloud_label})")
+    print(f"  - Blue Pixels   : {blue_pixels} (Labels: {blue_labels})")
+    print(f"  - Yellow Pixels : {yellow_pixels} (Labels: {yellow_labels})")
+    print(f"  - Cloud Pixels  : {cloud_pixels} (Labels: {cloud_labels})")
     print("-----------------------------------------\n")
 
 
