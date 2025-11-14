@@ -137,7 +137,7 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
     # --- 返回包含所有细节的完整结果给API ---
     final_response = {
         **analysis_data, 
-        **analysis_result, # 合并所有百分比等详细信息
+        **analysis_result,
         "output_directory": output_dir_web_format
     }
     return final_response
