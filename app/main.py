@@ -110,28 +110,37 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
             masked_image_path = output_dir_path / "03_ocean_only.png"
             Image.fromarray(ocean_only_image_array).save(masked_image_path)
             
-            # 分析函数接收的也是去雾后的图像
-            analysis_result = processor.analyze_ocean_color(np.array(dehazed_image_pil), str(output_dir_path))
+            # 调用全局分析函数
+            analysis_result = processor.analyze_ocean_color(
+                image_array=ocean_only_image_array, # 使用仅包含海洋的图像进行分析
+                ocean_mask=ocean_mask,
+                output_dir=str(output_dir_path)
+            )
+            
+            # 将核心指标存入数据库
             analysis_data.update({
                 "status": analysis_result.get("status", "error"),
-                "sea_blueness": analysis_result.get("seaBlueness"),
+                "sea_blueness": analysis_result.get("seaBlueness"), # 这是最终得分
                 "cloud_coverage": analysis_result.get("cloudCoverage"),
             })
 
         except Exception as e:
             print(f"[{timestamp}] An unexpected error occurred during analysis: {e}")
             analysis_data["status"] = "error"
+            analysis_result = {}
 
     # --- 持久化过程 ---
     result_to_persist = schemas.AnalysisResultCreate(**analysis_data)
     crud.upsert_analysis_result(db, result_data=result_to_persist)
     print(f"[{timestamp}] Data for timestamp has been upserted to the database.")
     
-    # 返回一个包含动态生成路径的完整结果，用于API响应
-    return {
-        **analysis_data,
-        "output_directory": output_dir_path.as_posix()
+    # --- 返回包含所有细节的完整结果给API ---
+    final_response = {
+        **analysis_data, 
+        **analysis_result, # 合并所有百分比等详细信息
+        "output_directory": output_dir_web_format
     }
+    return final_response
 
 # =================================================================
 #  Scheduled Task
@@ -190,8 +199,8 @@ async def lifespan(app: FastAPI):
     print("--- Application starting up ---")
     init_db()
     
-    if str(os.getenv("SKIP_INITIAL_TASK", "false")).lower() in ('true', '1', 't'):
-        print("[Lifespan] Skipping initial task run as per SKIP_INITIAL_TASK env var.")
+    if config.SKIP_INITIAL_TASK:
+        print("[Lifespan] Skipping initial task run as per SKIP_INITIAL_TASK configuration.")
     else:
         print("[Lifespan] Performing initial task run...")
         scheduled_analysis_task()
@@ -244,7 +253,7 @@ def get_results(db: Session = Depends(get_db)):
         
     return R_success(data=response_data)
 
-@app.post("/api/debug/analyze/{timestamp}", summary="Debug/Re-run Analysis for a Timestamp")
+@app.get("/api/debug/analyze/{timestamp}", summary="Debug/Re-run Analysis for a Timestamp")
 async def debug_analyze_by_timestamp(timestamp: int, db: Session = Depends(get_db)):
     """
     对单个时间戳执行分析。

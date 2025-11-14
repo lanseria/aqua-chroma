@@ -74,8 +74,23 @@ TIME_ZONE = "Asia/Shanghai"
 NIGHT_START_HOUR = 16
 NIGHT_END_HOUR = 7
 CLOUD_THRESHOLD = 200
-THICK_CLOUD_COVERAGE = 0.7
-BLUE_LOWER_BOUND = [100, 40, 20]
-BLUE_UPPER_BOUND = [140, 255, 255]
+# 定义判定为“云层过厚”的云量覆盖阈值 (50%)
+CLOUD_COVERAGE_THRESHOLD = 0.5
+
+# --- 2. K-Means 聚类配置 ---
+# K-Means 算法将寻找 K 个主要颜色簇：蓝水、黄水、云层。
+K_MEANS_CLUSTERS = 3
+# 用于识别“云/白沫”簇。饱和度(S)低于此值且明度(V)高于此值的被认为是云。
+CLOUD_CLUSTER_SATURATION_MAX = 50
+CLOUD_CLUSTER_VALUE_MIN = 180
+# 用于在剩下的非云簇中识别“蓝色水体”簇。Hue(H)值大于此阈值的被认为是蓝色。
+BLUE_CLUSTER_HUE_THRESHOLD = 80
+
+
 # --- 定义调试图片的基准输出目录 ---
 OUTPUT_BASE_DIR = "data/output"
+
+# --- 调度器配置 ---
+# 是否在应用启动时跳过第一次立即执行的分析任务
+# 在 .env 文件中设置 SKIP_INITIAL_TASK=true 来启用
+SKIP_INITIAL_TASK = str(os.getenv("SKIP_INITIAL_TASK", "false")).lower() in ('true', '1', 't')

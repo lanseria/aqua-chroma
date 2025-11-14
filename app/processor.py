@@ -14,72 +14,92 @@ def is_night(timestamp: int) -> bool:
     dt_local = datetime.fromtimestamp(timestamp, tz=tz)
     return not (config.NIGHT_END_HOUR <= dt_local.hour < config.NIGHT_START_HOUR)
 
-
-def analyze_ocean_color(image_array: np.ndarray, output_dir: str) -> Dict[str, Any]:
+def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str) -> Dict[str, Any]:
     """
-    分析经过蒙版处理后的海洋图像，返回分析结果，并保存中间过程图像。
+    使用优化的全局 K-Means (在缩放图像上运行) 进行分析，以获得最佳性能和视觉效果。
     """
-    # 1. 检查无数据 (全黑图像)
-    if not np.any(image_array):
-        return {"status": "无数据", "details": "图像数据全黑"}
+    original_h, original_w = image_array.shape[:2]
 
-    # 2. 计算有效像素 (非黑色部分)
-    gray_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
-    total_pixels = np.count_nonzero(gray_image)
-    if total_pixels == 0:
-        return {"status": "无数据", "details": "裁剪后无有效海洋区域"}
+    # --- 1. 初始检查 ---
+    if np.count_nonzero(ocean_mask) == 0:
+        return {"status": "无数据", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
 
-    # 3. 云层分析
-    _, cloud_mask = cv2.threshold(gray_image, config.CLOUD_THRESHOLD, 255, cv2.THRESH_BINARY)
+    # --- 2. 图像缩放，以提高性能和聚类效果 ---
+    target_width = 500  # 设定一个用于分析的目标宽度
+    scale = target_width / original_w
+    small_image = cv2.resize(image_array, (target_width, int(original_h * scale)))
+    # 缩放蒙版时必须用 INTER_NEAREST 以免边缘模糊
+    small_mask = cv2.resize(ocean_mask, (target_width, int(original_h * scale)), interpolation=cv2.INTER_NEAREST)
+
+    # --- 3. 准备 K-Means 数据 (从缩放后的图像中提取) ---
+    ocean_pixels = small_image[small_mask > 0]
+    total_ocean_pixels_small = ocean_pixels.shape[0]
+    if total_ocean_pixels_small < config.K_MEANS_CLUSTERS:
+        return {"status": "像素不足", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
+
+    # --- 4. 执行 K-Means 聚类 ---
+    pixels_float = np.float32(ocean_pixels)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    _, labels, centers_rgb = cv2.kmeans(
+        pixels_float, config.K_MEANS_CLUSTERS, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+    )
+    centers_rgb = np.uint8(centers_rgb)
+    centers_hsv = cv2.cvtColor(centers_rgb.reshape(1, -1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+
+    # --- 5. 智能识别三个簇的身份 ---
+    blue_label, yellow_label, cloud_label = -1, -1, -1
+    remaining_labels = list(range(config.K_MEANS_CLUSTERS))
     
-    # --- 新增：保存云层蒙版 ---
-    cloud_mask_path = os.path.join(output_dir, "04_cloud_mask.png") # 序号+1
-    Image.fromarray(cloud_mask).save(cloud_mask_path)
+    # 5.1 优先识别云层
+    for i in remaining_labels:
+        s, v = centers_hsv[i][1], centers_hsv[i][2]
+        if s < config.CLOUD_CLUSTER_SATURATION_MAX and v > config.CLOUD_CLUSTER_VALUE_MIN:
+            cloud_label = i
+            break
+    if cloud_label != -1:
+        remaining_labels.remove(cloud_label)
+
+    # 5.2 在剩下的簇中识别蓝/黄
+    if len(remaining_labels) >= 2:
+        hue1 = centers_hsv[remaining_labels[0]][0]
+        if hue1 > config.BLUE_CLUSTER_HUE_THRESHOLD:
+            blue_label, yellow_label = remaining_labels[0], remaining_labels[1]
+        else:
+            blue_label, yellow_label = remaining_labels[1], remaining_labels[0]
+
+    # --- 6. 统计各类像素数量 (基于缩放后的图像) ---
+    pixel_counts = np.bincount(labels.flatten())
+    blue_pixels = int(pixel_counts[blue_label]) if blue_label != -1 and blue_label < len(pixel_counts) else 0
+    yellow_pixels = int(pixel_counts[yellow_label]) if yellow_label != -1 and yellow_label < len(pixel_counts) else 0
+    cloud_pixels = int(pixel_counts[cloud_label]) if cloud_label != -1 and cloud_label < len(pixel_counts) else 0
+
+    # --- 7. 生成并保存分类调试图 (先小后大) ---
+    # 7.1 创建一个小的分类图
+    segmented_pixels = centers_rgb[labels.flatten()]
+    small_classification_map = np.zeros_like(small_image)
+    small_classification_map[small_mask > 0] = segmented_pixels
+    # 7.2 将其放大回原始尺寸，保持清晰的色块边界
+    full_classification_map = cv2.resize(
+        small_classification_map, (original_w, original_h), interpolation=cv2.INTER_NEAREST
+    )
+    Image.fromarray(full_classification_map).save(os.path.join(output_dir, "04_kmeans_classification.png"))
+
+    # --- 8. 计算各项指标 (比例是关键，不受缩放影响) ---
+    total_water_pixels = blue_pixels + yellow_pixels
+    sea_blueness_score = (blue_pixels / total_water_pixels) if total_water_pixels > 0 else 0.0
     
-    cloud_pixels = np.count_nonzero(cloud_mask)
-    cloud_coverage = cloud_pixels / total_pixels
-    
-    if cloud_coverage > config.THICK_CLOUD_COVERAGE:
-        return {"status": "云层过厚", "details": f"cloud_coverage: {cloud_coverage:.2%}"}
+    # 百分比是相对于缩放后的总海洋像素计算，结果一致
+    cloud_coverage = cloud_pixels / total_ocean_pixels_small
+    blue_percentage = blue_pixels / total_ocean_pixels_small
+    yellow_percentage = yellow_pixels / total_ocean_pixels_small
 
-    # 4. 移除稀薄云层并计算海蓝程度
-    ocean_mask = gray_image > 0
-    cloud_free_mask = ocean_mask & (cloud_mask == 0)
-
-    # --- 新增：保存移除云层后的图像 ---
-    cloud_free_image = cv2.bitwise_and(image_array, image_array, mask=cloud_free_mask.astype(np.uint8))
-    cloud_free_path = os.path.join(output_dir, "05_cloud_free.png") # 序号+1
-    Image.fromarray(cloud_free_image).save(cloud_free_path)
-    
-    hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
-    lower_blue = np.array(config.BLUE_LOWER_BOUND)
-    upper_blue = np.array(config.BLUE_UPPER_BOUND)
-    blue_mask = cv2.inRange(hsv_image, lower_blue, upper_blue)
-    
-    # --- 新增：保存原始蓝色区域蒙版 ---
-    blue_mask_path = os.path.join(output_dir, "05_raw_blue_mask.png")
-    Image.fromarray(blue_mask).save(blue_mask_path)
-
-    final_blue_ocean_mask = cv2.bitwise_and(blue_mask, blue_mask, mask=cloud_free_mask.astype(np.uint8))
-
-    # --- 新增：保存最终用于计算的蓝色海洋区域蒙版 ---
-    final_blue_mask_path = os.path.join(output_dir, "06_final_blue_ocean_mask.png")
-    Image.fromarray(final_blue_ocean_mask).save(final_blue_mask_path)
-
-    blue_pixel_count = np.count_nonzero(final_blue_ocean_mask)
-    cloud_free_pixel_count = np.count_nonzero(cloud_free_mask)
-
-    if cloud_free_pixel_count == 0:
-        return {"status": "云层稀薄", "details": "移除云层后无有效海域"}
-
-    blueness_ratio = blue_pixel_count / cloud_free_pixel_count
-    
     return {
-        "status": "completed", # 使用英文状态
-        "seaBlueness": blueness_ratio, # 使用英文键名和原始浮点数
-        "cloudCoverage": cloud_coverage # 使用英文键名和原始浮点数
+        "status": "completed",
+        "seaBlueness": sea_blueness_score,
+        "cloudCoverage": cloud_coverage,
+        "bluePercentage": blue_percentage,
+        "yellowPercentage": yellow_percentage,
     }
-
 
 def dehaze_dark_channel(image_bgr: np.ndarray, patch_size: int = 15, omega: float = 0.95, t0: float = 0.1) -> np.ndarray:
     """
