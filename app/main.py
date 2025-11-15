@@ -94,6 +94,7 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         dehazed_image_pil.save(dehazed_image_path)
         
         # --- 后续流程使用去雾后的图像 ---
+        analysis_result = {}  # <-- 在 try 之前初始化
         try:
             # 使用 dehazed_image_pil 替代 stitched_image
             image_array = np.array(dehazed_image_pil) 
