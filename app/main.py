@@ -71,64 +71,57 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         "sea_blueness": None,
         "cloud_coverage": None,
     }
+    # 关键修复：在函数顶部初始化 analysis_result
+    analysis_result = {}
+
     if processor.is_night(timestamp):
         analysis_data["status"] = "night"
     else:
         stitched_image = downloader.download_stitched_image(timestamp)
         if stitched_image is None:
-            return None  # 下载失败则中止
+            analysis_data["status"] = "download_failed"
+            # 不要提前返回，让后面的逻辑统一处理持久化和响应
+        else:
+            # --- 步骤 1: 保存原始下载图 ---
+            raw_image_path = output_dir_path / "01_downloaded_cropped.png"
+            stitched_image.save(raw_image_path)
 
-        # --- 步骤 1: 保存原始下载图 ---
-        raw_image_path = output_dir_path / "01_downloaded_cropped.png"
-        stitched_image.save(raw_image_path)
-
-        # --- 新增步骤 2: 对图像进行去雾处理 ---
-        # 2.1 将 PIL Image 转换为 OpenCV BGR 格式
-        image_bgr = cv2.cvtColor(np.array(stitched_image), cv2.COLOR_RGB2BGR)
-        # 2.2 调用去雾函数
-        dehazed_image_bgr = processor.dehaze_dark_channel(image_bgr)
-        # 2.3 将处理后的 BGR 图像转回 PIL RGB 格式，用于后续流程和保存
-        dehazed_image_pil = Image.fromarray(cv2.cvtColor(dehazed_image_bgr, cv2.COLOR_BGR2RGB))
-        # 2.4 保存去雾后的图像以供调试
-        dehazed_image_path = output_dir_path / "01a_dehazed.png"
-        dehazed_image_pil.save(dehazed_image_path)
-        
-        # --- 后续流程使用去雾后的图像 ---
-        analysis_result = {}  # <-- 在 try 之前初始化
-        try:
-            # 使用 dehazed_image_pil 替代 stitched_image
-            image_array = np.array(dehazed_image_pil) 
-            ocean_mask = geo_utils.create_ocean_mask(
-                image_shape=image_array.shape,
-                geojson_path=config.GEOJSON_PATH,
-                bounds=config.TARGET_AREA
-            )
-            mask_path = output_dir_path / "02_generated_mask.png"
-            Image.fromarray(ocean_mask).save(mask_path)
+            # --- 新增步骤 2: 对图像进行去雾处理 ---
+            image_bgr = cv2.cvtColor(np.array(stitched_image), cv2.COLOR_RGB2BGR)
+            dehazed_image_bgr = processor.dehaze_dark_channel(image_bgr)
+            dehazed_image_pil = Image.fromarray(cv2.cvtColor(dehazed_image_bgr, cv2.COLOR_BGR2RGB))
+            dehazed_image_path = output_dir_path / "01a_dehazed.png"
+            dehazed_image_pil.save(dehazed_image_path)
             
-            # 使用 dehazed_image_pil 替代 stitched_image
-            ocean_only_image_array = geo_utils.apply_mask(dehazed_image_pil, ocean_mask)
-            masked_image_path = output_dir_path / "03_ocean_only.png"
-            Image.fromarray(ocean_only_image_array).save(masked_image_path)
-            
-            # 调用全局分析函数
-            analysis_result = processor.analyze_ocean_color(
-                image_array=ocean_only_image_array, # 使用仅包含海洋的图像进行分析
-                ocean_mask=ocean_mask,
-                output_dir=str(output_dir_path)
-            )
-            
-            # 将核心指标存入数据库
-            analysis_data.update({
-                "status": analysis_result.get("status", "error"),
-                "sea_blueness": analysis_result.get("seaBlueness"), # 这是最终得分
-                "cloud_coverage": analysis_result.get("cloudCoverage"),
-            })
-
-        except Exception as e:
-            print(f"[{timestamp}] An unexpected error occurred during analysis: {e}")
-            analysis_data["status"] = "error"
-            analysis_result = {}
+            # --- 后续流程使用去雾后的图像 ---
+            try:
+                image_array = np.array(dehazed_image_pil) 
+                ocean_mask = geo_utils.create_ocean_mask(
+                    image_shape=image_array.shape,
+                    geojson_path=config.GEOJSON_PATH,
+                    bounds=config.TARGET_AREA
+                )
+                mask_path = output_dir_path / "02_generated_mask.png"
+                Image.fromarray(ocean_mask).save(mask_path)
+                
+                ocean_only_image_array = geo_utils.apply_mask(dehazed_image_pil, ocean_mask)
+                masked_image_path = output_dir_path / "03_ocean_only.png"
+                Image.fromarray(ocean_only_image_array).save(masked_image_path)
+                
+                analysis_result = processor.analyze_ocean_color(
+                    image_array=ocean_only_image_array,
+                    ocean_mask=ocean_mask,
+                    output_dir=str(output_dir_path)
+                )
+                
+                analysis_data.update({
+                    "status": analysis_result.get("status", "error"),
+                    "sea_blueness": analysis_result.get("seaBlueness"),
+                    "cloud_coverage": analysis_result.get("cloudCoverage"),
+                })
+            except Exception as e:
+                print(f"[{timestamp}] An unexpected error occurred during analysis: {e}")
+                analysis_data["status"] = "error"
 
     # --- 持久化过程 ---
     result_to_persist = schemas.AnalysisResultCreate(**analysis_data)
