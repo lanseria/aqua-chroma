@@ -77,16 +77,29 @@ CLOUD_THRESHOLD = 200
 # 定义判定为“云层过厚”的云量覆盖阈值 (50%)
 CLOUD_COVERAGE_THRESHOLD = 0.5
 
-# --- 2. K-Means 聚类配置 ---
-# K-Means 算法将寻找 K 个主要颜色簇：蓝水、黄水、云层。
-K_MEANS_CLUSTERS = 3
-# 用于识别“云/白沫”簇。饱和度(S)低于此值且明度(V)高于此值的被认为是云。
-CLOUD_CLUSTER_SATURATION_MAX = 50
-CLOUD_CLUSTER_VALUE_MIN = 100
-# 用于在剩下的非云簇中识别“蓝色水体”簇。Hue(H)值大于此阈值的被认为是蓝色。
-BLUE_CLUSTER_HUE_THRESHOLD = 80
-# 二次云/雾识别阈值：在第一轮识别后，若某个簇的饱和度低于此值，也将其视为云/雾。
-CLOUD_SECONDARY_SATURATION_THRESHOLD = 32
+# --- 2. HSV 颜色空间分类配置 ---
+# 基于像素的颜色范围阈值法，取代 K-Means。
+# 注意: OpenCV 中的 HSV 范围: H:[0, 179], S:[0, 255], V:[0, 255]
+COLOR_CLASSIFICATION_HSV_RANGES = {
+    # 云/白沫/高亮反光: 通常具有很低的饱和度(S)和很高的明度(V)。
+    "CLOUD": {
+        "lower": [0, 0, 128],
+        "upper": [179, 40, 255]
+    },
+    # 蓝色的水体: 具有特定的蓝色色相(H)范围。
+    "BLUE_WATER": {
+        "lower": [85, 50, 50],
+        "upper": [130, 255, 255]
+    }
+    # "黄色的水体" 将作为 "既不是云也不是蓝水" 的其他所有海洋像素的统称。
+}
+
+# --- 图像预处理配置 ---
+# 在进行任何分析之前，对输入图像进行放大的倍率。
+# 1.0 表示不进行任何缩放。
+# 2.0 表示将图像的宽度和高度都放大到原来的2倍。
+# 推荐使用高质量的 Bicubic 插值算法，以获得更好的效果。
+PRE_ANALYSIS_SCALE_FACTOR = 2.0
 
 
 # --- 定义调试图片的基准输出目录 ---
@@ -96,3 +109,9 @@ OUTPUT_BASE_DIR = "data/output"
 # 是否在应用启动时跳过第一次立即执行的分析任务
 # 在 .env 文件中设置 SKIP_INITIAL_TASK=true 来启用
 SKIP_INITIAL_TASK = str(os.getenv("SKIP_INITIAL_TASK", "false")).lower() in ('true', '1', 't')
+# --- 图像预处理配置 ---
+# 在进行任何分析之前，对输入图像进行放大的倍率。
+# 1.0 表示不进行任何缩放。
+# 2.0 表示将图像的宽度和高度都放大到原来的2倍。
+# 推荐使用高质量的 Bicubic 插值算法，以获得更好的效果。
+PRE_ANALYSIS_SCALE_FACTOR = 2.0

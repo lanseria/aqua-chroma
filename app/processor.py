@@ -16,110 +16,67 @@ def is_night(timestamp: int) -> bool:
 
 def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str) -> Dict[str, Any]:
     """
-    使用优化的全局 K-Means (在缩放图像上运行) 进行分析，并提供详细的调试信息。
+    使用基于 HSV 颜色范围的阈值法对海洋图像进行分类和分析。
     """
-    original_h, original_w = image_array.shape[:2]
-
-    if np.count_nonzero(ocean_mask) == 0:
+    total_ocean_pixels = np.count_nonzero(ocean_mask)
+    if total_ocean_pixels == 0:
         return {"status": "无数据", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
 
-    target_width = 500
-    scale = target_width / original_w
-    small_image = cv2.resize(image_array, (target_width, int(original_h * scale)))
-    small_mask = cv2.resize(ocean_mask, (target_width, int(original_h * scale)), interpolation=cv2.INTER_NEAREST)
+    # --- 1. 转换到 HSV 颜色空间 ---
+    hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
 
-    ocean_pixels = small_image[small_mask > 0]
-    total_ocean_pixels_small = ocean_pixels.shape[0]
-    if total_ocean_pixels_small < config.K_MEANS_CLUSTERS:
-        return {"status": "像素不足", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
-
-    pixels_float = np.float32(ocean_pixels)
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    _, labels, centers_rgb = cv2.kmeans(
-        pixels_float, config.K_MEANS_CLUSTERS, None, criteria, 10, cv2.KMEANS_PP_CENTERS
-    )
-    centers_rgb = np.uint8(centers_rgb)
-    centers_hsv = cv2.cvtColor(centers_rgb.reshape(1, -1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
-
-    # --- 5. 智能识别 + 详细打印 (V3版，带二次云/雾识别) ---
-    print("\n--- [Processor] K-Means Cluster Analysis ---")
+    # --- 2. 根据配置定义 HSV 范围 ---
+    ranges = config.COLOR_CLASSIFICATION_HSV_RANGES
+    cloud_lower = np.array(ranges["CLOUD"]["lower"])
+    cloud_upper = np.array(ranges["CLOUD"]["upper"])
+    blue_lower = np.array(ranges["BLUE_WATER"]["lower"])
+    blue_upper = np.array(ranges["BLUE_WATER"]["upper"])
     
-    # 使用列表来存储标签，以应对多个云簇的情况
-    blue_labels, yellow_labels, cloud_labels = [], [], []
-    identities = ["Undetermined"] * config.K_MEANS_CLUSTERS
-    unassigned_labels = list(range(config.K_MEANS_CLUSTERS))
-
-    # 5.1 第一轮：识别明亮的云/白沫 (Primary Cloud)
-    for i in unassigned_labels[:]:
-        s, v = centers_hsv[i][1], centers_hsv[i][2]
-        if s < config.CLOUD_CLUSTER_SATURATION_MAX and v > config.CLOUD_CLUSTER_VALUE_MIN:
-            cloud_labels.append(i)
-            identities[i] = "Cloud (Primary)"
-            unassigned_labels.remove(i)
-            break 
-
-    # 5.2 第二轮：识别低饱和度的云/雾 (Secondary Cloud/Fog)
-    for i in unassigned_labels[:]:
-        s = centers_hsv[i][1]
-        if s < config.CLOUD_SECONDARY_SATURATION_THRESHOLD:
-            cloud_labels.append(i)
-            identities[i] = "Cloud (Secondary/Fog)"
-            unassigned_labels.remove(i)
-
-    # 5.3 第三轮：在剩下的簇中识别蓝水
-    for i in unassigned_labels[:]:
-        h = centers_hsv[i][0]
-        if h > config.BLUE_CLUSTER_HUE_THRESHOLD:
-            blue_labels.append(i)
-            identities[i] = "Blue Water"
-            unassigned_labels.remove(i)
-            break 
-
-    # 5.4 第四轮：最后剩下的都归为黄水
-    if unassigned_labels:
-        yellow_labels.extend(unassigned_labels)
-        for i in unassigned_labels:
-            identities[i] = "Yellow Water"
-
-    # 5.5 打印最终识别结果
-    for i in range(config.K_MEANS_CLUSTERS):
-        print(f"  - Cluster {i}: RGB={centers_rgb[i]}, HSV={centers_hsv[i]} -> Identified as: {identities[i]}")
-
-
-    # --- 6. 统计各类像素数量 (新版，基于标签列表) + 详细打印 ---
-    pixel_counts = np.bincount(labels.flatten())
+    # --- 3. 像素分类 ---
+    # 规则应用有优先级：首先判断是不是云，然后在非云像素中判断是不是蓝水。
     
-    # 辅助函数，确保标签在像素统计范围内
-    def count_pixels_for_labels(label_list):
-        return sum(int(pixel_counts[l]) for l in label_list if l < len(pixel_counts))
+    # 3.1 识别所有符合“云”颜色范围的像素
+    cloud_mask_hsv = cv2.inRange(hsv_image, cloud_lower, cloud_upper)
+    # 最终的云像素必须同时在海洋区域内和HSV颜色范围内
+    final_cloud_mask = cv2.bitwise_and(cloud_mask_hsv, cloud_mask_hsv, mask=ocean_mask)
 
-    blue_pixels = count_pixels_for_labels(blue_labels)
-    yellow_pixels = count_pixels_for_labels(yellow_labels)
-    cloud_pixels = count_pixels_for_labels(cloud_labels)
+    # 3.2 识别所有符合“蓝水”颜色范围的像素
+    blue_mask_hsv = cv2.inRange(hsv_image, blue_lower, blue_upper)
+    # 最终的蓝水像素必须在海洋区域内、在HSV颜色范围内，且【不是】云
+    non_cloud_mask = cv2.bitwise_not(final_cloud_mask)
+    final_blue_mask = cv2.bitwise_and(blue_mask_hsv, blue_mask_hsv, mask=non_cloud_mask)
+    final_blue_mask = cv2.bitwise_and(final_blue_mask, final_blue_mask, mask=ocean_mask) # 再次确认在海洋区
 
-    print("\n--- [Processor] Pixel Count Summary ---")
-    print(f"  - Blue Pixels   : {blue_pixels} (Labels: {blue_labels})")
-    print(f"  - Yellow Pixels : {yellow_pixels} (Labels: {yellow_labels})")
-    print(f"  - Cloud Pixels  : {cloud_pixels} (Labels: {cloud_labels})")
-    print("-----------------------------------------\n")
+    # 3.3 “黄水”是海洋区域内所有非云、非蓝水的像素
+    non_cloud_blue_mask = cv2.bitwise_not(cv2.bitwise_or(final_cloud_mask, final_blue_mask))
+    final_yellow_mask = cv2.bitwise_and(ocean_mask, non_cloud_blue_mask)
 
+    # --- 4. 统计各类像素数量 ---
+    cloud_pixels = np.count_nonzero(final_cloud_mask)
+    blue_pixels = np.count_nonzero(final_blue_mask)
+    yellow_pixels = np.count_nonzero(final_yellow_mask)
 
-    # --- 7. 生成并保存分类调试图 ---
-    segmented_pixels = centers_rgb[labels.flatten()]
-    small_classification_map = np.zeros_like(small_image)
-    small_classification_map[small_mask > 0] = segmented_pixels
-    full_classification_map = cv2.resize(
-        small_classification_map, (original_w, original_h), interpolation=cv2.INTER_NEAREST
-    )
-    Image.fromarray(full_classification_map).save(os.path.join(output_dir, "04_kmeans_classification.png"))
+    print("\n--- [Processor] HSV Thresholding Pixel Count ---")
+    print(f"  - Cloud Pixels      : {cloud_pixels}")
+    print(f"  - Blue Water Pixels : {blue_pixels}")
+    print(f"  - Yellow Water Pixels: {yellow_pixels}")
+    print("--------------------------------------------------\n")
 
-    # --- 8. 计算各项指标 ---
+    # --- 5. 生成并保存分类调试图 ---
+    classification_map_bgr = np.zeros_like(image_array, dtype=np.uint8)
+    classification_map_bgr[final_cloud_mask > 0] = (255, 255, 255)  # 白色
+    classification_map_bgr[final_blue_mask > 0] = (255, 0, 0)      # 蓝色 (BGR)
+    classification_map_bgr[final_yellow_mask > 0] = (0, 255, 255)  # 黄色 (BGR)
+    classification_map_rgb = cv2.cvtColor(classification_map_bgr, cv2.COLOR_BGR2RGB)
+    Image.fromarray(classification_map_rgb).save(os.path.join(output_dir, "04_hsv_classification.png"))
+
+    # --- 6. 计算各项指标 ---
     total_water_pixels = blue_pixels + yellow_pixels
     sea_blueness_score = (blue_pixels / total_water_pixels) if total_water_pixels > 0 else 0.0
     
-    cloud_coverage = cloud_pixels / total_ocean_pixels_small
-    blue_percentage = blue_pixels / total_ocean_pixels_small
-    yellow_percentage = yellow_pixels / total_ocean_pixels_small
+    cloud_coverage = cloud_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
+    blue_percentage = blue_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
+    yellow_percentage = yellow_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
 
     return {
         "status": "completed",
@@ -127,10 +84,9 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
         "cloudCoverage": cloud_coverage,
         "bluePercentage": blue_percentage,
         "yellowPercentage": yellow_percentage,
-        # 新增: 返回原始像素计数值
-        "bluePixels": blue_pixels,
-        "yellowPixels": yellow_pixels,
-        "cloudPixels": cloud_pixels,
+        "bluePixels": int(blue_pixels),
+        "yellowPixels": int(yellow_pixels),
+        "cloudPixels": int(cloud_pixels),
     }
 
 def dehaze_dark_channel(image_bgr: np.ndarray, patch_size: int = 15, omega: float = 0.95, t0: float = 0.1) -> np.ndarray:

@@ -54,24 +54,82 @@ def get_db():
 #  Core Analysis Logic
 # =================================================================
 
+def _process_image_pipeline(image: Image.Image, output_dir_path: Path) -> Dict[str, Any]:
+    """
+    接收一个PIL图像，执行完整的分析流程，并保存所有中间调试图。
+    这是为测试用例设计的核心可重用逻辑。
+
+    Args:
+        image: 输入的 PIL.Image.Image 对象。
+        output_dir_path: 用于保存所有输出文件的 pathlib.Path 对象。
+
+    Returns:
+        一个包含详细分析结果的字典。
+    """
+    # 确保输出目录存在
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+    
+    analysis_result = {}
+    try:
+        # --- 步骤 1: 根据配置放大图像 (预处理) ---
+        scale_factor = config.PRE_ANALYSIS_SCALE_FACTOR
+        if scale_factor > 1.0:
+            print(f"将图像放大 {scale_factor} 倍...")
+            # 将 PIL 图像转换为 OpenCV 格式 (BGR)
+            image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # 使用 Bicubic 插值进行高质量放大
+            new_width = int(image_bgr.shape[1] * scale_factor)
+            new_height = int(image_bgr.shape[0] * scale_factor)
+            upscaled_bgr = cv2.resize(image_bgr, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+            
+            # 将放大后的图像转换回 PIL 格式 (RGB)
+            image_to_process = Image.fromarray(cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2RGB))
+        else:
+            image_to_process = image
+        
+        # --- 步骤 2: 保存预处理后的输入图 ---
+        # 无论是否放大，都保存将要用于分析的图像
+        input_image_path = output_dir_path / "01_input_processed.png"
+        image_to_process.save(input_image_path)
+
+        # --- 步骤 3: 创建并应用地理蒙版 (使用预处理后的图像) ---
+        image_array = np.array(image_to_process) 
+        ocean_mask = geo_utils.create_ocean_mask(
+            image_shape=image_array.shape,
+            geojson_path=config.GEOJSON_PATH,
+            bounds=config.TARGET_AREA
+        )
+        
+        ocean_only_image_array = geo_utils.apply_mask(image_to_process, ocean_mask)
+        masked_image_path = output_dir_path / "03_ocean_only.png"
+        Image.fromarray(ocean_only_image_array).save(masked_image_path)
+        
+        # --- 步骤 4: 核心颜色分析 ---
+        analysis_result = processor.analyze_ocean_color(
+            image_array=ocean_only_image_array,
+            ocean_mask=ocean_mask,
+            output_dir=str(output_dir_path)
+        )
+
+    except Exception as e:
+        print(f"An unexpected error occurred during image processing pipeline: {e}")
+        # 如果处理失败，返回一个表示错误状态的字典
+        analysis_result = {"status": "error"}
+        
+    return analysis_result
+
+
 def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | None:
     """
-    对单个时间戳执行完整的分析，返回一个包含所有信息的字典。
+    对单个时间戳执行完整的分析，包括下载、处理和持久化。
     """
     print(f"\n--- [Core Logic] Processing timestamp: {timestamp} ---")
     
     output_dir_path = Path("data") / "output" / str(timestamp)
-    os.makedirs(output_dir_path, exist_ok=True)
     output_dir_web_format = output_dir_path.as_posix()
 
-    # 初始化将要存入数据库的数据结构
-    analysis_data = {
-        "timestamp": timestamp,
-        "status": "unknown",
-        "sea_blueness": None,
-        "cloud_coverage": None,
-    }
-    # 关键修复：在函数顶部初始化 analysis_result
+    analysis_data = {"timestamp": timestamp}
     analysis_result = {}
 
     if processor.is_night(timestamp):
@@ -80,66 +138,30 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         stitched_image = downloader.download_stitched_image(timestamp)
         if stitched_image is None:
             analysis_data["status"] = "download_failed"
-            # 不要提前返回，让后面的逻辑统一处理持久化和响应
         else:
-            # --- 步骤 1: 保存原始下载图 ---
-            raw_image_path = output_dir_path / "01_downloaded_cropped.png"
-            stitched_image.save(raw_image_path)
-
-            # --- 新增步骤 2: 对图像进行去雾处理 ---
-            image_bgr = cv2.cvtColor(np.array(stitched_image), cv2.COLOR_RGB2BGR)
-            dehazed_image_bgr = processor.dehaze_dark_channel(image_bgr)
-            dehazed_image_pil = Image.fromarray(cv2.cvtColor(dehazed_image_bgr, cv2.COLOR_BGR2RGB))
-            dehazed_image_path = output_dir_path / "01a_dehazed.png"
-            dehazed_image_pil.save(dehazed_image_path)
+            # 调用新封装的图像处理流水线
+            analysis_result = _process_image_pipeline(stitched_image, output_dir_path)
             
-            # --- 后续流程使用去雾后的图像 ---
-            try:
-                image_array = np.array(dehazed_image_pil) 
-                ocean_mask = geo_utils.create_ocean_mask(
-                    image_shape=image_array.shape,
-                    geojson_path=config.GEOJSON_PATH,
-                    bounds=config.TARGET_AREA
-                )
-                mask_path = output_dir_path / "02_generated_mask.png"
-                Image.fromarray(ocean_mask).save(mask_path)
-                
-                ocean_only_image_array = geo_utils.apply_mask(dehazed_image_pil, ocean_mask)
-                masked_image_path = output_dir_path / "03_ocean_only.png"
-                Image.fromarray(ocean_only_image_array).save(masked_image_path)
-                
-                analysis_result = processor.analyze_ocean_color(
-                    image_array=ocean_only_image_array,
-                    ocean_mask=ocean_mask,
-                    output_dir=str(output_dir_path)
-                )
-                
-                analysis_data.update({
-                    "status": analysis_result.get("status", "error"),
-                    "sea_blueness": analysis_result.get("seaBlueness"),
-                    "cloud_coverage": analysis_result.get("cloudCoverage"),
-                })
-            except Exception as e:
-                print(f"[{timestamp}] An unexpected error occurred during analysis: {e}")
-                analysis_data["status"] = "error"
+            # 从处理结果更新要持久化的数据
+            analysis_data.update({
+                "status": analysis_result.get("status", "error"),
+                "sea_blueness": analysis_result.get("seaBlueness"),
+                "cloud_coverage": analysis_result.get("cloudCoverage"),
+            })
 
     # --- 持久化过程 ---
     result_to_persist = schemas.AnalysisResultCreate(**analysis_data)
     db_record = crud.upsert_analysis_result(db, result_data=result_to_persist)
     print(f"[{timestamp}] Data for timestamp has been upserted to the database.")
     
-    # --- 准备API响应，确保无重复字段且使用驼峰命名 ---
-    # 1. 以 processor 返回的详细结果为基础 (已经是驼峰命名)
+    # --- 准备API响应 ---
     final_response = analysis_result.copy()
-    
-    # 2. 从数据库记录中获取 id 和最终确认的 status
-    #    这样可以确保即使 analysis_result 出错，status 也是准确的
-    final_response['id'] = db_record.id
-    final_response['status'] = db_record.status
-    final_response['timestamp'] = db_record.timestamp
-
-    # 3. 添加动态生成的路径
-    final_response["output_directory"] = output_dir_web_format
+    final_response.update({
+        'id': db_record.id,
+        'status': db_record.status,
+        'timestamp': db_record.timestamp,
+        'output_directory': output_dir_web_format
+    })
     
     return final_response
 

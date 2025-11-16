@@ -4,3 +4,4 @@ data
 .DS_Store
 .env
 ai/project_context.txt
+test_results
