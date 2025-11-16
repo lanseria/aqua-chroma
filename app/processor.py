@@ -4,7 +4,7 @@ import os # 导入os模块
 import numpy as np
 import cv2
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from PIL import Image # 导入Image模块
 from . import config
 
@@ -14,9 +14,10 @@ def is_night(timestamp: int) -> bool:
     dt_local = datetime.fromtimestamp(timestamp, tz=tz)
     return not (config.NIGHT_END_HOUR <= dt_local.hour < config.NIGHT_START_HOUR)
 
-def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str) -> Dict[str, Any]:
+def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
     """
     使用基于 HSV 颜色范围的阈值法对海洋图像进行分类和分析。
+    新增: hsv_ranges_override 参数，用于接收临时的HSV阈值。
     """
     total_ocean_pixels = np.count_nonzero(ocean_mask)
     if total_ocean_pixels == 0:
@@ -26,7 +27,10 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
 
     # --- 2. 根据配置定义 HSV 范围 ---
-    ranges = config.COLOR_CLASSIFICATION_HSV_RANGES
+    # 优先使用传入的 hsv_ranges_override，否则回退到 config 文件中的默认值
+    ranges = hsv_ranges_override if hsv_ranges_override is not None else config.COLOR_CLASSIFICATION_HSV_RANGES
+    print(f"--- [Processor] Using HSV Ranges: {ranges} ---")
+    
     cloud_lower = np.array(ranges["CLOUD"]["lower"])
     cloud_upper = np.array(ranges["CLOUD"]["upper"])
     blue_lower = np.array(ranges["BLUE_WATER"]["lower"])

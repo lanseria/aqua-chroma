@@ -83,12 +83,12 @@ CLOUD_COVERAGE_THRESHOLD = 0.5
 COLOR_CLASSIFICATION_HSV_RANGES = {
     # 云/白沫/高亮反光: 通常具有很低的饱和度(S)和很高的明度(V)。
     "CLOUD": {
-        "lower": [0, 0, 140],
+        "lower": [0, 0, 112],
         "upper": [179, 40, 255]
     },
     # 蓝色的水体: 具有特定的蓝色色相(H)范围。
     "BLUE_WATER": {
-        "lower": [85, 0, 0],
+        "lower": [20, 0, 0],
         "upper": [130, 255, 255]
     }
     # "黄色的水体" 将作为 "既不是云也不是蓝水" 的其他所有海洋像素的统称。

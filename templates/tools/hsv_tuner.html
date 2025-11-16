@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSV 批量调试器</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f7f9; color: #333; margin: 0; padding: 20px; display: flex; gap: 20px; }
+        .sidebar { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); min-width: 400px; max-width: 400px; height: calc(100vh - 40px); overflow-y: auto; }
+        .main-content { flex-grow: 1; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); height: calc(100vh - 40px); overflow-y: auto; }
+        h1, h2, h3 { color: #1a2c4e; }
+        button { width: 100%; padding: 12px; margin-top: 15px; border-radius: 5px; border: none; font-size: 16px; background-color: #007bff; color: white; cursor: pointer; transition: background-color 0.2s; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
+        .slider-group { margin-bottom: 15px; }
+        .slider-group fieldset { border: 1px solid #e0e0e0; border-radius: 5px; padding: 10px; }
+        .slider-group legend { font-weight: bold; color: #0056b3; }
+        .slider-control { display: grid; grid-template-columns: 40px 1fr 50px; align-items: center; gap: 10px; margin-bottom: 5px; }
+        .slider-control label { font-size: 14px; }
+        .slider-control input[type="range"] { width: 100%; }
+        .slider-control span { font-family: monospace; font-size: 14px; text-align: right; background: #eee; padding: 2px 5px; border-radius: 3px; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.7); z-index: 1000; display: none; justify-content: center; align-items: center; font-size: 24px; color: #0056b3; }
+        #error-display { color: #d9534f; background-color: #f2dede; border: 1px solid #ebccd1; padding: 10px; border-radius: 4px; margin-top: 15px; display: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: middle; }
+        th { background-color: #f2f2f2; }
+        td img { max-width: 200px; height: auto; border-radius: 4px; display: block; }
+        .metrics { font-family: monospace; white-space: pre; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay">正在处理所有图片...</div>
+
+    <aside class="sidebar">
+        <h1>HSV 参数</h1>
+        <p>在此处调整参数，然后点击按钮，将它们应用于 `test_images` 目录中的所有图片。</p>
+        
+        <div id="hsv-controls">
+            <div class="slider-group">
+                <fieldset>
+                    <legend>☁️ 云层 / 高亮 (CLOUD)</legend>
+                    <div id="cloud-sliders"></div>
+                </fieldset>
+            </div>
+            <div class="slider-group">
+                <fieldset>
+                    <legend>💧 蓝色水体 (BLUE_WATER)</legend>
+                    <div id="blue-water-sliders"></div>
+                </fieldset>
+            </div>
+        </div>
+
+        <button id="reprocess-btn">分析所有测试图片</button>
+        <div id="error-display"></div>
+    </aside>
+
+    <main class="main-content">
+        <h2>分析结果</h2>
+        <div id="results-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>测试用例</th>
+                        <th>输入图 (处理后)</th>
+                        <th>颜色分类图</th>
+                        <th>分析指标</th>
+                    </tr>
+                </thead>
+                <tbody id="results-table-body">
+                    <tr>
+                        <td colspan="4" style="text-align: center;">点击左侧按钮开始分析...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const cloudSlidersContainer = document.getElementById('cloud-sliders');
+            const blueWaterSlidersContainer = document.getElementById('blue-water-sliders');
+            const reprocessBtn = document.getElementById('reprocess-btn');
+            const resultsTableBody = document.getElementById('results-table-body');
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const errorDisplay = document.getElementById('error-display');
+            
+            const initialHsv = JSON.parse('{{ initial_hsv | tojson | safe }}');
+
+            function createSliders(category, container) {
+                const types = ['lower', 'upper'];
+                const channels = ['H', 'S', 'V'];
+                types.forEach(type => {
+                    channels.forEach((channel, i) => {
+                        const max = channel === 'H' ? 179 : 255;
+                        const value = initialHsv[category.toUpperCase()][type][i];
+                        const id = `${category}-${channel.toLowerCase()}-${type}`;
+                        
+                        const control = document.createElement('div');
+                        control.className = 'slider-control';
+                        control.innerHTML = `
+                            <label for="${id}">${channel}<sub>${type[0]}</sub></label>
+                            <input type="range" id="${id}" min="0" max="${max}" value="${value}">
+                            <span id="${id}-value">${value}</span>
+                        `;
+                        container.appendChild(control);
+
+                        document.getElementById(id).addEventListener('input', (e) => {
+                            document.getElementById(`${id}-value`).textContent = e.target.value;
+                        });
+                    });
+                });
+            }
+
+            createSliders('cloud', cloudSlidersContainer);
+            createSliders('blue_water', blueWaterSlidersContainer);
+
+            reprocessBtn.addEventListener('click', runBatchAnalysis);
+
+            async function runBatchAnalysis() {
+                loadingOverlay.style.display = 'flex';
+                reprocessBtn.disabled = true;
+                errorDisplay.style.display = 'none';
+                resultsTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">正在请求服务器进行分析...</td></tr>';
+
+                const hsv_ranges = {
+                    "CLOUD": {
+                        "lower": [
+                            parseInt(document.getElementById('cloud-h-lower').value), parseInt(document.getElementById('cloud-s-lower').value), parseInt(document.getElementById('cloud-v-lower').value)
+                        ],
+                        "upper": [
+                            parseInt(document.getElementById('cloud-h-upper').value), parseInt(document.getElementById('cloud-s-upper').value), parseInt(document.getElementById('cloud-v-upper').value)
+                        ]
+                    },
+                    "BLUE_WATER": {
+                        "lower": [
+                            parseInt(document.getElementById('blue_water-h-lower').value), parseInt(document.getElementById('blue_water-s-lower').value), parseInt(document.getElementById('blue_water-v-lower').value)
+                        ],
+                        "upper": [
+                            parseInt(document.getElementById('blue_water-h-upper').value), parseInt(document.getElementById('blue_water-s-upper').value), parseInt(document.getElementById('blue_water-v-upper').value)
+                        ]
+                    }
+                };
+
+                try {
+                    const response = await fetch('/tools/api/reprocess_all_hsv', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hsv_ranges })
+                    });
+                    
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+                    const result = await response.json();
+                    
+                    if (result.success && Array.isArray(result.data)) {
+                        renderResultsTable(result.data);
+                    } else {
+                        throw new Error(result.error || '返回的数据格式不正确。');
+                    }
+                } catch (error) {
+                    errorDisplay.textContent = `请求失败: ${error.message}`;
+                    errorDisplay.style.display = 'block';
+                    resultsTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">分析失败，请查看左侧错误信息。</td></tr>';
+                } finally {
+                    loadingOverlay.style.display = 'none';
+                    reprocessBtn.disabled = false;
+                }
+            }
+
+            function renderResultsTable(data) {
+                resultsTableBody.innerHTML = ''; // 清空表格
+                if (data.length === 0) {
+                     resultsTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">未找到任何测试图片或所有图片处理失败。</td></tr>';
+                     return;
+                }
+
+                const cacheBuster = `?t=${new Date().getTime()}`;
+
+                data.forEach(item => {
+                    const row = resultsTableBody.insertRow();
+                    row.insertCell(0).textContent = item.image_name;
+                    
+                    if (item.error) {
+                        const errorCell = row.insertCell(1);
+                        errorCell.colSpan = 3;
+                        errorCell.innerHTML = `<span style="color: red;">处理失败: ${item.error}</span>`;
+                        return;
+                    }
+                    
+                    row.insertCell(1).innerHTML = `<img src="${item.image_urls.input_processed}${cacheBuster}" alt="Input">`;
+                    row.insertCell(2).innerHTML = `<img src="${item.image_urls.classification}${cacheBuster}" alt="Classification">`;
+                    
+                    const metrics = item.analysis;
+                    const metricsHtml = `
+                    <div class="metrics">Status: ${metrics.status}
+Sea Blueness: ${(metrics.seaBlueness * 100).toFixed(2)}%
+Cloud Cover:  ${(metrics.cloudCoverage * 100).toFixed(2)}%
+--------------------
+Blue Pixels:  ${metrics.bluePixels || 0}
+Cloud Pixels: ${metrics.cloudPixels || 0}
+Yellow Pixels:${metrics.yellowPixels || 0}</div>`;
+                    row.insertCell(3).innerHTML = metricsHtml;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

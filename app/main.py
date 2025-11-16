@@ -1,9 +1,7 @@
 # app/main.py
-
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -12,10 +10,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from . import config, crud, downloader, geo_utils, processor, schemas
+from . import config, crud, downloader, geo_utils, processor, schemas, tools, pipeline
 from .database import SessionLocal, init_db
 
 # =================================================================
@@ -37,8 +36,11 @@ def R_fail(msg: str = "Fail", code: int = 500, data: Any = None):
     )
 
 # =================================================================
-#  Database Dependency
+#  Database Dependency & Template Engine
 # =================================================================
+
+# 为调试工具提供Jinja2模板引擎
+templates = Jinja2Templates(directory="templates")
 
 def get_db():
     """
@@ -54,14 +56,15 @@ def get_db():
 #  Core Analysis Logic
 # =================================================================
 
-def _process_image_pipeline(image: Image.Image, output_dir_path: Path) -> Dict[str, Any]:
+def _process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
     """
     接收一个PIL图像，执行完整的分析流程，并保存所有中间调试图。
-    这是为测试用例设计的核心可重用逻辑。
+    这是为测试用例和调试工具设计的核心可重用逻辑。
 
     Args:
         image: 输入的 PIL.Image.Image 对象。
         output_dir_path: 用于保存所有输出文件的 pathlib.Path 对象。
+        hsv_ranges_override: 可选的HSV参数字典，用于覆盖默认配置。
 
     Returns:
         一个包含详细分析结果的字典。
@@ -75,21 +78,15 @@ def _process_image_pipeline(image: Image.Image, output_dir_path: Path) -> Dict[s
         scale_factor = config.PRE_ANALYSIS_SCALE_FACTOR
         if scale_factor > 1.0:
             print(f"将图像放大 {scale_factor} 倍...")
-            # 将 PIL 图像转换为 OpenCV 格式 (BGR)
             image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            
-            # 使用 Bicubic 插值进行高质量放大
             new_width = int(image_bgr.shape[1] * scale_factor)
             new_height = int(image_bgr.shape[0] * scale_factor)
             upscaled_bgr = cv2.resize(image_bgr, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-            
-            # 将放大后的图像转换回 PIL 格式 (RGB)
             image_to_process = Image.fromarray(cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2RGB))
         else:
             image_to_process = image
         
         # --- 步骤 2: 保存预处理后的输入图 ---
-        # 无论是否放大，都保存将要用于分析的图像
         input_image_path = output_dir_path / "01_input_processed.png"
         image_to_process.save(input_image_path)
 
@@ -109,12 +106,12 @@ def _process_image_pipeline(image: Image.Image, output_dir_path: Path) -> Dict[s
         analysis_result = processor.analyze_ocean_color(
             image_array=ocean_only_image_array,
             ocean_mask=ocean_mask,
-            output_dir=str(output_dir_path)
+            output_dir=str(output_dir_path),
+            hsv_ranges_override=hsv_ranges_override # 将覆盖参数传递给核心函数
         )
 
     except Exception as e:
         print(f"An unexpected error occurred during image processing pipeline: {e}")
-        # 如果处理失败，返回一个表示错误状态的字典
         analysis_result = {"status": "error"}
         
     return analysis_result
@@ -139,10 +136,11 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         if stitched_image is None:
             analysis_data["status"] = "download_failed"
         else:
-            # 调用新封装的图像处理流水线
-            analysis_result = _process_image_pipeline(stitched_image, output_dir_path)
+            # 调用图像处理流水线 (常规任务不传递 hsv_ranges_override)
+            analysis_result = pipeline.process_image_pipeline(stitched_image, output_dir_path)
             
             # 从处理结果更新要持久化的数据
+            
             analysis_data.update({
                 "status": analysis_result.get("status", "error"),
                 "sea_blueness": analysis_result.get("seaBlueness"),
@@ -199,7 +197,6 @@ def scheduled_analysis_task():
             
         print(f"[Scheduler] Found {len(new_timestamps)} new timestamps to process.")
         for ts in new_timestamps:
-            # 调度任务只处理新数据，所以这里实际上总是 "insert"
             run_analysis_and_persist(ts, db)
     
     except Exception as e:
@@ -243,8 +240,14 @@ app = FastAPI(
     description="An automated service for monitoring ocean color from satellite imagery."
 )
 
+# --- Include Routers ---
+app.include_router(tools.router)
+
 # --- Mount Static Files ---
 app.mount("/data", StaticFiles(directory="data"), name="data")
+# 挂载测试工具的输出目录，使其可以在网页上访问
+app.mount("/test_results", StaticFiles(directory="test_results"), name="test_results")
+
 
 # =================================================================
 #  API Endpoints
@@ -263,13 +266,10 @@ def get_results(db: Session = Depends(get_db)):
     
     response_data: List[schemas.AnalysisResultResponse] = []
     for result in results_from_db:
-        # 1. 使用 AnalysisResultFromDB 模型来安全地验证从数据库取出的数据
-        #    这一步现在不会再报错了，因为模型和数据是匹配的
         db_data = schemas.AnalysisResultFromDB.model_validate(result)
         
-        # 2. 手动创建最终的响应模型，并动态添加 output_directory
         response_item = schemas.AnalysisResultResponse(
-            **db_data.model_dump(), # 复制所有已验证的字段
+            **db_data.model_dump(),
             output_directory=f"{config.OUTPUT_BASE_DIR}/{db_data.timestamp}"
         )
         response_data.append(response_item)
