@@ -71,11 +71,12 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     Image.fromarray(classification_map_rgb).save(os.path.join(output_dir, "04_hsv_classification.png"))
 
     # --- 6. 计算各项指标 ---
-    total_water_pixels = blue_pixels + yellow_pixels
-    sea_blueness_score = (blue_pixels / total_water_pixels) if total_water_pixels > 0 else 0.0
+    # 修复：sea_blueness_score 的分母应该是总的海洋像素，而不仅仅是可见水体像素。
+    # 这确保了云层覆盖率会正确地降低海蓝分数。
+    sea_blueness_score = (blue_pixels / total_ocean_pixels) if total_ocean_pixels > 0 else 0.0
     
     cloud_coverage = cloud_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
-    blue_percentage = blue_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
+    blue_percentage = blue_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0 # 该指标与sea_blueness现在一致
     yellow_percentage = yellow_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
 
     return {
