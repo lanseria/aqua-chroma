@@ -70,7 +70,7 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     classification_map_bgr = np.zeros_like(image_array, dtype=np.uint8)
     classification_map_bgr[final_cloud_mask > 0] = (255, 255, 255)  # 白色
     classification_map_bgr[final_blue_mask > 0] = (138, 89, 0)     # 蓝色 (BGR)
-    classification_map_bgr[final_yellow_mask > 0] = (1, 25, 70)  # 棕色 (BGR)
+    classification_map_bgr[final_yellow_mask > 0] = (9, 117, 161)  # 棕色 (BGR)
     classification_map_rgb = cv2.cvtColor(classification_map_bgr, cv2.COLOR_BGR2RGB)
     Image.fromarray(classification_map_rgb).save(os.path.join(output_dir, "04_hsv_classification.png"))
 

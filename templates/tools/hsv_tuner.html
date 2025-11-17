@@ -24,7 +24,7 @@
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: middle; }
         th { background-color: #f2f2f2; }
-        td img { max-width: 200px; height: auto; border-radius: 4px; display: block; }
+        td img { max-width: 160px; height: auto; border-radius: 4px; display: block; }
         .metrics { font-family: monospace; white-space: pre; font-size: 12px; }
     </style>
 </head>
@@ -61,14 +61,15 @@
                 <thead>
                     <tr>
                         <th>测试用例</th>
-                        <th>输入图 (处理后)</th>
+                        <th>输入图</th>
+                        <th>色彩均衡图</th>
                         <th>颜色分类图</th>
                         <th>分析指标</th>
                     </tr>
                 </thead>
                 <tbody id="results-table-body">
                     <tr>
-                        <td colspan="4" style="text-align: center;">点击左侧按钮开始分析...</td>
+                        <td colspan="5" style="text-align: center;">点击左侧按钮开始分析...</td>
                     </tr>
                 </tbody>
             </table>
@@ -170,8 +171,8 @@
             function renderResultsTable(data) {
                 resultsTableBody.innerHTML = ''; // 清空表格
                 if (data.length === 0) {
-                     resultsTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">未找到任何测试图片或所有图片处理失败。</td></tr>';
-                     return;
+                    resultsTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">未找到任何测试图片或所有图片处理失败。</td></tr>';
+                    return;
                 }
 
                 const cacheBuster = `?t=${new Date().getTime()}`;
@@ -182,13 +183,14 @@
                     
                     if (item.error) {
                         const errorCell = row.insertCell(1);
-                        errorCell.colSpan = 3;
+                        errorCell.colSpan = 4; // 注意 colSpan 变为 4
                         errorCell.innerHTML = `<span style="color: red;">处理失败: ${item.error}</span>`;
                         return;
                     }
                     
                     row.insertCell(1).innerHTML = `<img src="${item.image_urls.input_processed}${cacheBuster}" alt="Input">`;
-                    row.insertCell(2).innerHTML = `<img src="${item.image_urls.classification}${cacheBuster}" alt="Classification">`;
+                    row.insertCell(2).innerHTML = `<img src="${item.image_urls.auto_balanced}${cacheBuster}" alt="Auto Balanced">`;
+                    row.insertCell(3).innerHTML = `<img src="${item.image_urls.classification}${cacheBuster}" alt="Classification">`;
                     
                     const metrics = item.analysis;
                     const metricsHtml = `
@@ -199,7 +201,7 @@ Cloud Cover:  ${(metrics.cloudCoverage * 100).toFixed(2)}%
 Blue Pixels:  ${metrics.bluePixels || 0}
 Cloud Pixels: ${metrics.cloudPixels || 0}
 Yellow Pixels:${metrics.yellowPixels || 0}</div>`;
-                    row.insertCell(3).innerHTML = metricsHtml;
+                    row.insertCell(4).innerHTML = metricsHtml;
                 });
             }
         });

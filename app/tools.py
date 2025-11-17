@@ -102,6 +102,8 @@ async def reprocess_all_with_hsv(payload: HsvProcessAllRequest):
                 "analysis": analysis_result,
                 "image_urls": {
                     "input_processed": f"{base_web_path}/01_input_processed.png",
+                    "auto_balanced": f"{base_web_path}/02_auto_balanced.png",
+                    "ocean_only": f"{base_web_path}/03_ocean_only.png",
                     "classification": f"{base_web_path}/04_hsv_classification.png"
                 }
             })

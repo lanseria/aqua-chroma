@@ -9,6 +9,32 @@ from PIL import Image
 
 from . import config, geo_utils, processor
 
+def _auto_balance_color(image_bgr: np.ndarray) -> np.ndarray:
+    """
+    使用 CLAHE 算法在 LAB 颜色空间上自动均衡图像的亮度和对比度。
+    """
+    print("--- [Pipeline] Performing auto color balance (CLAHE)...")
+    
+    # 1. 将图像从 BGR 转换到 LAB 颜色空间
+    lab_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    
+    # 2. 分离 L, A, B 通道
+    l_channel, a_channel, b_channel = cv2.split(lab_image)
+    
+    # 3. 创建 CLAHE 对象 (clipLimit 控制对比度限制，tileGridSize 控制局部区域大小)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    
+    # 4. 仅对 L (亮度) 通道应用 CLAHE
+    enhanced_l_channel = clahe.apply(l_channel)
+    
+    # 5. 合并增强后的 L 通道和原始的 A, B 通道
+    merged_lab_image = cv2.merge([enhanced_l_channel, a_channel, b_channel])
+    
+    # 6. 将图像从 LAB 转换回 BGR 颜色空间
+    balanced_bgr_image = cv2.cvtColor(merged_lab_image, cv2.COLOR_LAB2BGR)
+    
+    print("--- [Pipeline] Auto color balance complete.")
+    return balanced_bgr_image
 
 def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
     """
@@ -44,19 +70,33 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         input_image_path = output_dir_path / "01_input_processed.png"
         image_to_process.save(input_image_path)
 
-        # --- 步骤 3: 创建并应用地理蒙版 (使用预处理后的图像) ---
-        image_array = np.array(image_to_process) 
+        # --- 新增步骤 2.5: 自动色彩均衡 ---
+        # 将 PIL Image 转换为 OpenCV BGR 格式
+        image_bgr = cv2.cvtColor(np.array(image_to_process), cv2.COLOR_RGB2BGR)
+        # 调用均衡函数
+        balanced_bgr = _auto_balance_color(image_bgr)
+        # 保存均衡后的调试图
+        balanced_image_path = output_dir_path / "02_auto_balanced.png"
+        cv2.imwrite(str(balanced_image_path), balanced_bgr)
+        # 将均衡后的图像 (BGR) 用于后续步骤
+        image_for_analysis_bgr = balanced_bgr
+
+        # --- 步骤 3: 创建并应用地理蒙版 (使用均衡后的图像) ---
+        # 注意：现在 image_for_analysis_bgr 是我们的数据源
         ocean_mask = geo_utils.create_ocean_mask(
-            image_shape=image_array.shape,
+            image_shape=image_for_analysis_bgr.shape,
             geojson_path=config.GEOJSON_PATH,
             bounds=config.TARGET_AREA
         )
         
-        ocean_only_image_array = geo_utils.apply_mask(image_to_process, ocean_mask)
+        # apply_mask 期望 PIL Image, 所以我们先转换一下
+        image_for_analysis_pil = Image.fromarray(cv2.cvtColor(image_for_analysis_bgr, cv2.COLOR_BGR2RGB))
+        ocean_only_image_array = geo_utils.apply_mask(image_for_analysis_pil, ocean_mask)
         masked_image_path = output_dir_path / "03_ocean_only.png"
         Image.fromarray(ocean_only_image_array).save(masked_image_path)
         
-        # --- 步骤 4: 核心颜色分析 ---
+        # --- 步骤 4: 核心颜色分析 (使用均衡且蒙版后的图像) ---
+        # analyze_ocean_color 期望 RGB array
         analysis_result = processor.analyze_ocean_color(
             image_array=ocean_only_image_array,
             ocean_mask=ocean_mask,
