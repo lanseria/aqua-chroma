@@ -71,8 +71,13 @@ TARGET_AREA = {
 }
 GEOJSON_PATH = "geojson/china.geojson"
 TIME_ZONE = "Asia/Shanghai"
-NIGHT_START_HOUR = 16
-NIGHT_END_HOUR = 7
+# --- 动态日照分析配置 ---
+# 用于计算日出日落的观测点坐标 (用户指定: [122.2, 30])
+MONITOR_LON = "122.2"
+MONITOR_LAT = "30"
+# 日出后/日落前的缓冲时间（小时），在此时间段内才进行分析
+DAYTIME_BUFFER_HOURS = 2
+
 CLOUD_THRESHOLD = 200
 # 定义判定为“云层过厚”的云量覆盖阈值 (50%)
 CLOUD_COVERAGE_THRESHOLD = 0.5
