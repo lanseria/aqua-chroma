@@ -88,7 +88,7 @@ CLOUD_COVERAGE_THRESHOLD = 0.5
 COLOR_CLASSIFICATION_HSV_RANGES = {
     # 云/白沫/高亮反光: 通常具有很低的饱和度(S)和很高的明度(V)。
     "CLOUD": {
-        "lower": [0, 0, 112],
+        "lower": [0, 0, 121],
         "upper": [179, 40, 255]
     },
     # 蓝色的水体: 具有特定的蓝色色相(H)范围。
