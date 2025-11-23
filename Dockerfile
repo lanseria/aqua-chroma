@@ -5,13 +5,13 @@ FROM m.daocloud.io/ghcr.io/astral-sh/uv:0.9.11-python3.13-bookworm
 WORKDIR /app
 
 # --- 1. 配置 APT 镜像源 ---
-RUN echo "\
-Types: deb\n\
-URIs: https://mirrors.zju.edu.cn/debian/\n\
-Suites: bookworm bookworm-updates bookworm-backports\n\
-Components: main contrib non-free non-free-firmware\n\
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\
-" > /etc/apt/sources.list.d/debian.sources
+# RUN echo "\
+# Types: deb\n\
+# URIs: https://mirrors.zju.edu.cn/debian/\n\
+# Suites: bookworm bookworm-updates bookworm-backports\n\
+# Components: main contrib non-free non-free-firmware\n\
+# Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\
+# " > /etc/apt/sources.list.d/debian.sources
 
 # --- 2. 安装系统依赖 ---
 RUN apt-get update && \
