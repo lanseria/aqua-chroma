@@ -144,6 +144,10 @@ uvicorn app.main:app --reload
 ```
 服务将在 `http://127.0.0.1:8000` 上运行。
 
+通过 hsv 工具调试
+
+https://www.qtccolor.com/secaiku/tool/convert?m=hsv
+
 ---
 
 ## 📂 项目结构
