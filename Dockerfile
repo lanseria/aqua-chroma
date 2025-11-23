@@ -5,6 +5,10 @@ FROM m.daocloud.io/ghcr.io/astral-sh/uv:0.9.11-python3.13-bookworm
 WORKDIR /app
 
 # --- 1. 配置 APT 镜像源 ---
+# 1. 先更新默认源并安装证书
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
+
+# --- 1. 配置 APT 镜像源 ---
 RUN echo "\
 Types: deb\n\
 URIs: https://mirrors.tuna.tsinghua.edu.cn/debian/\n\
