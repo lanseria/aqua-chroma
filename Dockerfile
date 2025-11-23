@@ -1,5 +1,5 @@
 # 使用官方的 uv 基础镜像
-FROM m.daocloud.io/ghcr.io/astral-sh/uv:0.9.11-python3.13-bookworm-slim
+FROM m.daocloud.io/ghcr.io/astral-sh/uv:0.9.11-python3.13-bookworm
 
 # 设置容器内的工作目录
 WORKDIR /app
