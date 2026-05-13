@@ -6,9 +6,6 @@
 [![Framework](https://img.shields.io/badge/framework-FastAPI-green.svg)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
- 
-*(提示: 建议您截取一张项目运行时的仪表盘图片，并替换上面的链接，以获得更好的展示效果)*
-
 ---
 
 ## ✨ 功能特性
@@ -52,7 +49,7 @@
 - 安装 [Docker](https://www.docker.com/get-started) 和 [Docker Compose](https://docs.docker.com/compose/install/)。
 - 克隆本项目:
   ```bash
-  git clone https://github.com/your-username/aqua-chroma.git
+  git clone https://github.com/lanseria/aqua-chroma.git
   cd aqua-chroma
   ```
 
