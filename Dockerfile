@@ -19,6 +19,8 @@ RUN apt-get update && \
     tzdata \
     build-essential \
     libeccodes-dev \
+    libgl1 \
+    libglib2.0-0 \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

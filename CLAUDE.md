@@ -13,10 +13,10 @@ Aqua-Chroma 是一个自动化海洋颜色监控系统，定时从卫星数据�
 uvicorn app.main:app --reload
 
 # Docker 构建与启动
-docker-compose up --build -d
+docker compose up --build -d
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 
 # 安装依赖（需要 uv 包管理器）
 uv sync --locked

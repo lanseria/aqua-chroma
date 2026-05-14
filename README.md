@@ -25,7 +25,7 @@
     - 采用 **无限滚动**（懒加载）方式展示历史数据卡片，优化性能。
     - 使用动态着色的 **进度条** 直观展示每条记录的海蓝程度和云层覆盖率。
 - **调试友好**: 每次分析都会将处理过程中的中间图像（如原始图、蒙版图、云层图等）保存到本地，便于调试和验证算法效果。
-- **容器化部署**: 提供 `Dockerfile` 和 `docker-compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
+- **容器化部署**: 提供 `Dockerfile` 和 `docker compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
 - **灵活配置**: 核心参数（如目标区域、数据源等）均可通过环境变量或配置文件进行修改，无需改动代码。
 
 ---
@@ -80,7 +80,7 @@ ACTIVE_DATA_SOURCE=ZOOM_EARTH
 在项目根目录下，运行以下命令：
 
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```- `--build`: 首次运行时，会根据 `Dockerfile` 构建镜像。
 - `-d`: 在后台（detached mode）运行服务。
 
@@ -92,7 +92,7 @@ docker-compose up --build -d
 
 - **查看实时日志**:
   ```bash
-  docker-compose logs -f
+  docker compose logs -f
   ```
 - **查看持久化数据**:
   所有分析结果（`analysis_results.json`）和调试图片都存储在 Docker 卷 `aqua-data` 中。您可以通过以下命令查看其在主机上的具体位置：
@@ -164,7 +164,7 @@ https://www.qtccolor.com/secaiku/tool/convert?m=hsv
 ├── static/               # 前端静态文件 (CSS, JS)
 ├── templates/            # 前端 HTML 模板
 ├── .env                  # 环境变量文件 (本地)
-├── docker-compose.yml    # Docker Compose 配置文件
+├── docker compose.yml    # Docker Compose 配置文件
 ├── Dockerfile            # Docker 镜像构建文件
 ├── pyproject.toml        # Python 项目定义与依赖
 └── README.md             # 项目说明文档
