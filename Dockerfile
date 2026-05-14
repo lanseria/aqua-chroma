@@ -1,31 +1,24 @@
-# 使用官方的 uv 基础镜像
-FROM m.daocloud.io/ghcr.io/astral-sh/uv:0.9.11-python3.13-bookworm
+FROM m.daocloud.io/ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # 设置容器内的工作目录
 WORKDIR /app
 
-# --- 1. 配置 APT 镜像源 ---
+# --- 1. 配置 APT 镜像源  ---
 RUN echo "\
 Types: deb\n\
-URIs: https://mirrors.zju.edu.cn/debian/\n\
+URIs: https://mirrors.tuna.tsinghua.edu.cn/debian/\n\
 Suites: bookworm bookworm-updates bookworm-backports\n\
 Components: main contrib non-free non-free-firmware\n\
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\
 " > /etc/apt/sources.list.d/debian.sources
 
-# --- 2. 安装系统依赖 ---
+# 更新 apt 包列表
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    # --- Geospatial Libraries (for rasterio, shapely) ---
-    libgdal-dev \
     libgeos-dev \
-    # --- OpenCV Dependencies ---
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    # --- Other System Dependencies ---
-    libeccodes-dev \
     tzdata \
-    # 清理APT缓存以减小镜像体积
+    build-essential \
+    libeccodes-dev \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
