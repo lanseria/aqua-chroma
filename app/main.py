@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import cv2
 import numpy as np
 import requests
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -178,7 +178,7 @@ def scheduled_analysis_task():
         print(f"[Scheduler] Found {len(processed_timestamps)} processed timestamps in DB.")
         
         timestamps_url = config.ACTIVE_CONFIG["timestamps_url"]
-        response = requests.get(timestamps_url, headers=config.COMMON_HEADERS)
+        response = requests.get(timestamps_url, headers=config.COMMON_HEADERS, timeout=30)
         response.raise_for_status()
         data = response.json()
         
@@ -209,7 +209,7 @@ def scheduled_analysis_task():
 #  FastAPI Application Setup
 # =================================================================
 
-scheduler = AsyncIOScheduler()
+scheduler = BackgroundScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
