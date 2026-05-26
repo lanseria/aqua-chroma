@@ -9,7 +9,7 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      - aqua-chroma-data:/app/data
+      - ${TILES_HOST_PATH:-aqua-chroma-data}:/app/data
     env_file:
       - .env    
     logging:
