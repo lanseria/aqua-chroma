@@ -115,7 +115,7 @@ OUTPUT_BASE_DIR = "data/output"
 # 在 .env 文件中设置 SKIP_INITIAL_TASK=true 来启用
 SKIP_INITIAL_TASK = str(os.getenv("SKIP_INITIAL_TASK", "false")).lower() in ('true', '1', 't')
 
-# --- 地图标注配置 (叠加在 01_input_processed.png 上，不参与颜色分析) ---
+# --- 地图标注配置 (输出为 01_input_annotated.png 可视化图，不参与颜色分析) ---
 # 陆地描边样式 (颜色统一使用 RGB 元组)
 LAND_OUTLINE = {
     "color": (255, 214, 0),       # 描边颜色 (琥珀黄)

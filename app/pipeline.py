@@ -66,16 +66,31 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         else:
             image_to_process = image
         
-        # --- 步骤 2: 创建地理蒙版 (提前计算，同时服务于地图标注与后续分析) ---
+        # --- 步骤 2: 保存预处理后的输入图 (干净无标注，与分析口径一致) ---
         image_array = np.array(image_to_process)
+        input_image_path = output_dir_path / "01_input_processed.png"
+        image_to_process.save(input_image_path)
+
+        # --- 步骤 3: 自动色彩均衡 ---
+        # 将 PIL Image 转换为 OpenCV BGR 格式
+        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        # 调用均衡函数
+        balanced_bgr = _auto_balance_color(image_bgr)
+        # 保存均衡后的调试图
+        balanced_image_path = output_dir_path / "02_auto_balanced.png"
+        cv2.imwrite(str(balanced_image_path), balanced_bgr)
+        # 将均衡后的图像 (BGR) 用于后续步骤
+        image_for_analysis_bgr = balanced_bgr
+
+        # --- 步骤 4: 创建地理蒙版 ---
         ocean_mask = geo_utils.create_ocean_mask(
             image_shape=image_array.shape,
             geojson_path=config.GEOJSON_PATH,
             bounds=config.TARGET_AREA
         )
 
-        # --- 步骤 3: 生成带地图标注的预处理输入图 (陆地描边 + 城市点位) ---
-        # 标注仅叠加在调试图上，后续颜色分析仍使用未标注的原图，避免污染统计结果
+        # --- 步骤 5: 生成带地图标注的可视化图 (陆地描边 + 城市点位) ---
+        # 标注仅叠加在 01_input_annotated.png 上仅供可视化，颜色分析始终使用未标注的干净图像
         img_height = image_array.shape[0]
         outline_cfg = config.LAND_OUTLINE
         annotated = geo_utils.draw_land_outline(
@@ -98,20 +113,9 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
             label_stroke=marker_cfg["label_stroke"],
             font=geo_utils.load_cjk_font(font_size, config.FONT_CANDIDATES),
         )
-        input_image_path = output_dir_path / "01_input_processed.png"
-        Image.fromarray(annotated).save(input_image_path)
+        annotated_image_path = output_dir_path / "01_input_annotated.png"
+        Image.fromarray(annotated).save(annotated_image_path)
 
-        # --- 步骤 3.5: 自动色彩均衡 (使用未标注的干净图像) ---
-        # 将 PIL Image 转换为 OpenCV BGR 格式
-        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-        # 调用均衡函数
-        balanced_bgr = _auto_balance_color(image_bgr)
-        # 保存均衡后的调试图
-        balanced_image_path = output_dir_path / "02_auto_balanced.png"
-        cv2.imwrite(str(balanced_image_path), balanced_bgr)
-        # 将均衡后的图像 (BGR) 用于后续步骤
-        image_for_analysis_bgr = balanced_bgr
-        
         # apply_mask 期望 PIL Image, 所以我们先转换一下
         image_for_analysis_pil = Image.fromarray(cv2.cvtColor(image_for_analysis_bgr, cv2.COLOR_BGR2RGB))
         ocean_only_image_array = geo_utils.apply_mask(image_for_analysis_pil, ocean_mask)
