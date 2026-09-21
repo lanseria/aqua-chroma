@@ -1,7 +1,3 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## 项目概述
 
 Aqua-Chroma 是一个自动化海洋颜色监控系统，定时从卫星数据源获取图像，通过 HSV 颜色分析计算海蓝程度和云层覆盖率，结果持久化到 PostgreSQL 并通过 Web 仪表盘可视化展示。
