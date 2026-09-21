@@ -114,9 +114,40 @@ OUTPUT_BASE_DIR = "data/output"
 # 是否在应用启动时跳过第一次立即执行的分析任务
 # 在 .env 文件中设置 SKIP_INITIAL_TASK=true 来启用
 SKIP_INITIAL_TASK = str(os.getenv("SKIP_INITIAL_TASK", "false")).lower() in ('true', '1', 't')
-# --- 图像预处理配置 ---
-# 在进行任何分析之前，对输入图像进行放大的倍率。
-# 1.0 表示不进行任何缩放。
-# 2.0 表示将图像的宽度和高度都放大到原来的2倍。
-# 推荐使用高质量的 Bicubic 插值算法，以获得更好的效果。
-PRE_ANALYSIS_SCALE_FACTOR = 2.0
+
+# --- 地图标注配置 (叠加在 01_input_processed.png 上，不参与颜色分析) ---
+# 陆地描边样式 (颜色统一使用 RGB 元组)
+LAND_OUTLINE = {
+    "color": (255, 214, 0),       # 描边颜色 (琥珀黄)
+    "thickness": 1,               # 描边线宽
+    "halo_color": (0, 0, 0),      # 描边外圈光晕颜色 (黑色，增强可读性)
+    "halo_thickness": 3,          # 光晕线宽，0 表示不绘制
+}
+# 城市点位样式
+CITY_MARKER = {
+    "marker_color": (255, 45, 45),   # 城市点颜色 (红)
+    "radius": 3,                     # 城市点半径 (像素，随图像尺寸自适应)
+    "label_color": (25, 25, 25),     # 城市名文字颜色
+    "label_stroke": 2,               # 文字白色描边宽度 (保证在海面/云层上都可读)
+}
+# 监测范围内的城市点位 (经纬度；绘制时超出图像可视范围的点位会被自动跳过)
+CITY_POINTS = [
+    {"name": "枸杞岛", "lon": 122.818, "lat": 30.722},
+    {"name": "嵊泗",   "lon": 122.451, "lat": 30.735},
+    {"name": "洋山港", "lon": 122.064, "lat": 30.633},
+    {"name": "岱山",   "lon": 122.204, "lat": 30.243},
+    {"name": "定海",   "lon": 122.107, "lat": 30.020},
+    {"name": "沈家门", "lon": 122.304, "lat": 29.949},
+    {"name": "宁波",   "lon": 121.551, "lat": 29.869},
+]
+# 中文字体搜索路径 (用于城市名标注，按顺序取第一个存在的文件；
+# 可通过环境变量 CJK_FONT_PATH 优先指定)
+CJK_FONT_PATH = os.getenv("CJK_FONT_PATH", "")
+FONT_CANDIDATES = [
+    CJK_FONT_PATH,
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+]
