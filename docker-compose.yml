@@ -6,6 +6,8 @@ services:
     image: aqua-chroma
     container_name: aqua-chroma-app
     restart: unless-stopped
+    networks:
+      - shared_app_net
     ports:
       - "8010:8000"
     volumes:
