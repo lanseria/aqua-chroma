@@ -2,73 +2,38 @@
 
 import os # 导入os模块
 import math
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 import ephem
 import numpy as np
 import cv2
 from PIL import Image # 导入Image模块
-from zoneinfo import ZoneInfo
 
 from . import config
 
 def is_night(timestamp: int) -> bool:
     """
-    根据地理位置和天文算法判断是否不处于“有效白天”时间段。
-    逻辑：
-    1. 获取该时间戳当天的日出和日落时间。
-    2. 有效时间窗口 = [日出 + BUFFER, 日落 - BUFFER]。
-    3. 如果当前时间在窗口之外，则视为黑夜/无效时间，返回 True。
+    根据太阳高度角判断该时间戳是否处于“有效白天”。
+    直接计算监测点上空此时刻的太阳高度角，低于 MIN_SUN_ELEVATION_DEG（见 config）
+    视为夜间/晨昏——光照不足以支撑 HSV 颜色分析。
+    高度角随季节逐日变化，有效窗口自动收放，无需维护时间缓冲表。
     """
     try:
-        # 1. 准备观察者对象
         observer = ephem.Observer()
         observer.lat = config.MONITOR_LAT
         observer.lon = config.MONITOR_LON
         observer.elevation = 0
-        
-        # 2. 确定“当天”的概念
-        # 为了确保我们计算的是该时间戳所属那“一天”的日出日落，
-        # 我们将观察时间设置为该时间戳对应当地日期的“正午 12:00”。
-        # 这样 ephem.previous_rising 必定是早上的日出，next_setting 必定是晚上的日落。
-        local_tz = ZoneInfo(config.TIME_ZONE)
-        dt_current = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        dt_local = dt_current.astimezone(local_tz)
-        
-        # 构造当地正午时间
-        dt_noon_local = dt_local.replace(hour=12, minute=0, second=0, microsecond=0)
-        dt_noon_utc = dt_noon_local.astimezone(timezone.utc)
-        
-        # 设置观察时间
-        observer.date = dt_noon_utc
+        observer.date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
-        # 3. 计算天文日出日落 (ephem 返回的是 UTC)
         sun = ephem.Sun()
-        sunrise_ephem = observer.previous_rising(sun)
-        sunset_ephem = observer.next_setting(sun)
-        
-        # 转换为 Python datetime (UTC)
-        sunrise_dt = ephem.Date(sunrise_ephem).datetime().replace(tzinfo=timezone.utc)
-        sunset_dt = ephem.Date(sunset_ephem).datetime().replace(tzinfo=timezone.utc)
-        
-        # 4. 应用缓冲时间 (早2小时，晚2小时)
-        buffer = timedelta(hours=config.DAYTIME_BUFFER_HOURS)
-        valid_start = sunrise_dt + buffer
-        valid_end = sunset_dt - buffer
-        
-        # 调试日志 (可选，可根据需要注释掉)
-        # print(f"[Check Day] TS: {dt_current} | Rise: {sunrise_dt} | Set: {sunset_dt} | Window: {valid_start} ~ {valid_end}")
+        sun.compute(observer)
+        altitude_deg = math.degrees(sun.alt)
 
-        # 5. 判断当前时间是否在有效区间内
-        # 如果在区间内，则不是黑夜(False)；否则是黑夜(True)
-        if valid_start <= dt_current <= valid_end:
-            return False
-        else:
-            return True
-            
+        return altitude_deg < config.MIN_SUN_ELEVATION_DEG
+
     except Exception as e:
-        print(f"Error calculating sun times: {e}. Fallback to processing.")
+        print(f"Error calculating sun altitude: {e}. Fallback to processing.")
         # 如果计算出错，为了保险起见，暂时认为是可以处理的（或者根据需求改为 True 跳过）
         return False
 
