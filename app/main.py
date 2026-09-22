@@ -1,4 +1,5 @@
 # app/main.py
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
@@ -56,6 +57,7 @@ def get_db():
 def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | None:
     """
     对单个时间戳执行完整的分析，包括下载、处理和持久化。
+    返回持久化后的记录状态（"completed"/"night"/"download_failed"/"error" 等）。
     """
     print(f"\n--- [Core Logic] Processing timestamp: {timestamp} ---")
     
@@ -96,45 +98,81 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         'timestamp': db_record.timestamp,
         'output_directory': output_dir_web_format
     })
-    
+
+    final_response['_record_status'] = db_record.status
     return final_response
 
 # =================================================================
 #  Scheduled Task
 # =================================================================
 
+def _fetch_available_timestamps() -> List[int]:
+    """从数据源拉取可用时间戳列表，失败时返回空列表。"""
+    timestamps_url = config.ACTIVE_CONFIG["timestamps_url"]
+    response = requests.get(timestamps_url, headers=config.COMMON_HEADERS, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    timestamp_key = config.ACTIVE_CONFIG["timestamp_json_key"]
+    all_timestamps = data.get(timestamp_key) if timestamp_key else data
+
+    if not isinstance(all_timestamps, list):
+        print("[Scheduler] Error: Timestamps data is not a list.")
+        return []
+    return all_timestamps
+
+
 def scheduled_analysis_task():
     """
     定时任务：获取新时间戳，分析数据，并存入数据库。
+    对下载失败的时间戳，在本周期内间隔重试若干轮（等待瓦片数据上线），
+    仍失败则保持 download_failed，交由下个调度周期继续重试。
     """
     print("\n>>> [Scheduler] Starting new analysis cycle...")
     db: Session = SessionLocal()
     try:
         processed_timestamps = crud.get_processed_timestamps(db)
         print(f"[Scheduler] Found {len(processed_timestamps)} processed timestamps in DB.")
-        
-        timestamps_url = config.ACTIVE_CONFIG["timestamps_url"]
-        response = requests.get(timestamps_url, headers=config.COMMON_HEADERS, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        timestamp_key = config.ACTIVE_CONFIG["timestamp_json_key"]
-        all_timestamps = data.get(timestamp_key) if timestamp_key else data
-        
-        if not isinstance(all_timestamps, list):
-            print(f"[Scheduler] Error: Timestamps data is not a list.")
+
+        all_timestamps = _fetch_available_timestamps()
+        if not all_timestamps:
             return
 
         new_timestamps = sorted([ts for ts in all_timestamps if ts not in processed_timestamps])
-        
+
         if not new_timestamps:
             print("[Scheduler] No new timestamps to process.")
             return
-            
+
         print(f"[Scheduler] Found {len(new_timestamps)} new timestamps to process.")
+
+        # 待重试队列：本轮下载失败的时间戳
+        pending_retries: List[int] = []
         for ts in new_timestamps:
-            run_analysis_and_persist(ts, db)
-    
+            result = run_analysis_and_persist(ts, db)
+            if result and result.get("_record_status") in crud.RETRYABLE_STATUSES:
+                pending_retries.append(ts)
+
+        # 周期内多轮重试，直到成功或轮次用尽
+        for round_no in range(2, config.FAILED_TIMESTAMP_RETRY_ROUNDS + 1):
+            if not pending_retries:
+                break
+            print(f"[Scheduler] {len(pending_retries)} timestamp(s) failed, "
+                  f"retry round {round_no}/{config.FAILED_TIMESTAMP_RETRY_ROUNDS} "
+                  f"in {config.FAILED_TIMESTAMP_RETRY_DELAY_SECONDS}s...")
+            time.sleep(config.FAILED_TIMESTAMP_RETRY_DELAY_SECONDS)
+            still_failing: List[int] = []
+            for ts in pending_retries:
+                result = run_analysis_and_persist(ts, db)
+                if result and result.get("_record_status") in crud.RETRYABLE_STATUSES:
+                    still_failing.append(ts)
+            pending_retries = still_failing
+
+        if pending_retries:
+            print(f"[Scheduler] {len(pending_retries)} timestamp(s) still failing after "
+                  f"{config.FAILED_TIMESTAMP_RETRY_ROUNDS} rounds: {pending_retries}. "
+                  f"Will retry in next cycle.")
+
     except Exception as e:
         print(f"[Scheduler] An error occurred during the scheduled task: {e}")
     finally:
@@ -220,8 +258,9 @@ async def debug_analyze_by_timestamp(timestamp: int, db: Session = Depends(get_d
     - 如果不存在，则创建。
     """
     result_data = run_analysis_and_persist(timestamp, db)
-    
+
     if result_data:
+        result_data.pop("_record_status", None)  # 内部重试标记，不对外暴露
         return R_success(data=result_data, msg=f"Analysis for timestamp {timestamp} has been successfully upserted.")
     else:
         return R_fail(

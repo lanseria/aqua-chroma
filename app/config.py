@@ -85,6 +85,16 @@ CLOUD_COVERAGE_THRESHOLD = 0.5
 # 本项目监测范围在 zoom 7 下仅约 1x2=2 块瓦片，0.9 实际上要求全部瓦片下载成功。
 MIN_TILE_SUCCESS_RATE = 0.9
 
+# --- 重试配置 ---
+# 单块瓦片下载失败时的重试次数与重试间隔（秒），应对瞬时网络抖动。
+TILE_DOWNLOAD_RETRIES = 3
+TILE_RETRY_DELAY_SECONDS = 2
+# 调度周期内，对下载失败的时间戳进行重试的轮数与每轮间隔（秒）。
+# 瓦片常因"该时间戳数据尚未发布"而 404，逐轮间隔重试可等待数据上线；
+# 全部轮次失败则保持 download_failed 状态，交由下个调度周期继续重试。
+FAILED_TIMESTAMP_RETRY_ROUNDS = 3
+FAILED_TIMESTAMP_RETRY_DELAY_SECONDS = 30
+
 # --- 2. HSV 颜色空间分类配置 ---
 # 基于像素的颜色范围阈值法，取代 K-Means。
 # 注意: OpenCV 中的 HSV 范围: H:[0, 179], S:[0, 255], V:[0, 255]

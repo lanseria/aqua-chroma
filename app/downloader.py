@@ -1,6 +1,7 @@
 # app/downloader.py
 
 import math
+import time
 from io import BytesIO
 from typing import Optional, Tuple
 from datetime import datetime, timezone
@@ -62,15 +63,22 @@ def download_stitched_image(timestamp: int) -> Optional[Image.Image]:
             else: # 默认为 "LOCAL_SERVER" 或其他类似格式
                 tile_url = tile_template.format(timestamp=timestamp, zoom=zoom, y=y, x=x)
             print(f"正在下载 {tile_url}...")
-            try:
-                res = requests.get(tile_url, timeout=5, headers=config.COMMON_HEADERS)
-                if res.status_code == 200:
-                    tile_image = Image.open(BytesIO(res.content))
-                    stitched_image.paste(tile_image, (j * tile_size, i * tile_size))
-                    downloaded_count += 1
-                else:
-                    stitched_image.paste(Image.new('RGB', (tile_size, tile_size), color='black'), (j * tile_size, i * tile_size))
-            except requests.exceptions.RequestException:
+            tile_ok = False
+            for attempt in range(1, config.TILE_DOWNLOAD_RETRIES + 1):
+                try:
+                    res = requests.get(tile_url, timeout=5, headers=config.COMMON_HEADERS)
+                    if res.status_code == 200:
+                        tile_image = Image.open(BytesIO(res.content))
+                        stitched_image.paste(tile_image, (j * tile_size, i * tile_size))
+                        downloaded_count += 1
+                        tile_ok = True
+                        break
+                    print(f"瓦片返回 {res.status_code}（第 {attempt}/{config.TILE_DOWNLOAD_RETRIES} 次尝试）")
+                except requests.exceptions.RequestException as e:
+                    print(f"瓦片请求异常（第 {attempt}/{config.TILE_DOWNLOAD_RETRIES} 次尝试）: {e}")
+                if attempt < config.TILE_DOWNLOAD_RETRIES:
+                    time.sleep(config.TILE_RETRY_DELAY_SECONDS)
+            if not tile_ok:
                 stitched_image.paste(Image.new('RGB', (tile_size, tile_size), color='black'), (j * tile_size, i * tile_size))
 
     print(f"下载完成。成功率: {downloaded_count}/{total_tiles}")
