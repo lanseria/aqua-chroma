@@ -79,6 +79,10 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     """
     total_ocean_pixels = np.count_nonzero(ocean_mask)
     if total_ocean_pixels == 0:
+        # 即使没有海洋像素，也写出一张全黑分类图，保证输出目录的产物文件齐全
+        Image.fromarray(np.zeros_like(image_array, dtype=np.uint8)).save(
+            os.path.join(output_dir, "04_hsv_classification.png")
+        )
         return {"status": "无数据", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
 
     # --- 1. 转换到 HSV 颜色空间 ---

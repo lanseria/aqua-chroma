@@ -74,7 +74,9 @@ def download_stitched_image(timestamp: int) -> Optional[Image.Image]:
                 stitched_image.paste(Image.new('RGB', (tile_size, tile_size), color='black'), (j * tile_size, i * tile_size))
 
     print(f"下载完成。成功率: {downloaded_count}/{total_tiles}")
-    if downloaded_count == 0:
+    min_required = max(1, math.ceil(total_tiles * config.MIN_TILE_SUCCESS_RATE))
+    if downloaded_count < min_required:
+        print(f"瓦片下载成功率过低（{downloaded_count}/{total_tiles}，要求至少 {min_required}），视为下载失败。")
         return None
 
     px_west, px_north = latlon_to_pixel_on_stitched(bounds['north'], bounds['west'], zoom, x_min, y_min)

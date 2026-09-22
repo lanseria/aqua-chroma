@@ -1,5 +1,6 @@
 # app/pipeline.py
 
+import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -51,7 +52,14 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
     """
     # 确保输出目录存在
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    
+
+    # 清空旧产物，避免上次中途失败留下的残缺/过时文件与新结果混杂
+    for old_file in output_dir_path.iterdir():
+        if old_file.is_file() or old_file.is_symlink():
+            old_file.unlink()
+        else:
+            shutil.rmtree(old_file)
+
     analysis_result = {}
     try:
         # --- 步骤 1: 根据配置放大图像 (预处理) ---
