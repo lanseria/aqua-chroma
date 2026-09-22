@@ -11,7 +11,7 @@ services:
     volumes:
       - ${TILES_HOST_PATH:-aqua-chroma-data}:/app/data
     env_file:
-      - .env    
+      - .env.production
     logging:
       driver: "json-file"
       options:
@@ -20,3 +20,8 @@ services:
 
 volumes:
   aqua-chroma-data:
+
+networks:
+  shared_app_net:
+    external: true
+    name: shared-db-network

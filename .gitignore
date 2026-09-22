@@ -3,4 +3,5 @@ __pycache__
 data
 .DS_Store
 .env
+.env.production
 test_results

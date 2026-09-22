@@ -6,12 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Database Configuration ---
-DB_USER = os.getenv("DB_USER", "user")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "aqua_chroma")
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if not DATABASE_URL:
+    raise ValueError("错误: 未设置 DATABASE_URL 环境变量（格式如 postgresql://user:password@host:5432/dbname）")
 
 COMMON_HEADERS = {
     'accept': '*/*',
