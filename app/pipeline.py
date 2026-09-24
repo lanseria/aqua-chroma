@@ -66,21 +66,19 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         # 优先使用 Real-ESRGAN x4 超分；失败自动降级为 bicubic（见 super_resolution.enhance）。
         scale_factor = config.ESRGAN_SCALE
         print(f"将图像高清化 {scale_factor} 倍 (Real-ESRGAN)...")
-        image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        upscaled_rgb = super_resolution.enhance(np.array(image))
+        image_array = np.array(image)
+        upscaled_rgb = super_resolution.enhance(image_array)
         image_to_process = Image.fromarray(upscaled_rgb)
-        # 保存高清化中间图，便于对比高清化前后效果
+        # 保存高清化前的干净原图（无标注），与超分结果 01b 形成前后对比
+        input_image_path = output_dir_path / "01_input_processed.png"
+        image.save(input_image_path)
+        # 保存高清化中间图（后续所有分析步骤的实际输入），便于对比高清化前后效果
         superres_image_path = output_dir_path / "01b_superresolved.png"
         image_to_process.save(superres_image_path)
-        
-        # --- 步骤 2: 保存预处理后的输入图 (干净无标注，与分析口径一致) ---
-        image_array = np.array(image_to_process)
-        input_image_path = output_dir_path / "01_input_processed.png"
-        image_to_process.save(input_image_path)
 
-        # --- 步骤 3: 自动色彩均衡 ---
-        # 将 PIL Image 转换为 OpenCV BGR 格式
-        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        # --- 步骤 2: 自动色彩均衡 ---
+        # 对高清化后的图像（即后续分析的实际输入）做均衡，保持整条链路尺寸一致
+        image_bgr = cv2.cvtColor(upscaled_rgb, cv2.COLOR_RGB2BGR)
         # 调用均衡函数
         balanced_bgr = _auto_balance_color(image_bgr)
         # 保存均衡后的调试图
@@ -89,19 +87,20 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         # 将均衡后的图像 (BGR) 用于后续步骤
         image_for_analysis_bgr = balanced_bgr
 
-        # --- 步骤 4: 创建地理蒙版 ---
+        # --- 步骤 3: 创建地理蒙版 ---
+        # 蒙版基于超分后的尺寸创建，与均衡图 / 海洋图 / 分类图全程尺寸一致
         ocean_mask = geo_utils.create_ocean_mask(
-            image_shape=image_array.shape,
+            image_shape=image_to_process.size[::-1],
             geojson_path=config.GEOJSON_PATH,
             bounds=config.TARGET_AREA
         )
 
-        # --- 步骤 5: 生成带地图标注的可视化图 (陆地描边 + 城市点位) ---
-        # 标注仅叠加在 01_input_annotated.png 上仅供可视化，颜色分析始终使用未标注的干净图像
-        img_height = image_array.shape[0]
+        # --- 步骤 4: 生成带地图标注的可视化图 (陆地描边 + 城市点位) ---
+        # 标注叠加在高清化图上仅供可视化，颜色分析始终使用未标注的干净图像
+        img_height = upscaled_rgb.shape[0]
         outline_cfg = config.LAND_OUTLINE
         annotated = geo_utils.draw_land_outline(
-            image_rgb=image_array,
+            image_rgb=upscaled_rgb,
             ocean_mask=ocean_mask,
             color=outline_cfg["color"],
             thickness=outline_cfg["thickness"],
@@ -129,7 +128,7 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         masked_image_path = output_dir_path / "03_ocean_only.png"
         Image.fromarray(ocean_only_image_array).save(masked_image_path)
         
-        # --- 步骤 4: 核心颜色分析 (使用均衡且蒙版后的图像) ---
+        # --- 步骤 5: 核心颜色分析 (使用均衡且蒙版后的图像) ---
         # analyze_ocean_color 期望 RGB array
         analysis_result = processor.analyze_ocean_color(
             image_array=ocean_only_image_array,
