@@ -62,6 +62,7 @@
                     <tr>
                         <th>测试用例</th>
                         <th>输入图</th>
+                        <th>高清化图 (Real-ESRGAN)</th>
                         <th>地图标注图</th>
                         <th>色彩均衡图</th>
                         <th>颜色分类图</th>
@@ -184,26 +185,30 @@
                     
                     if (item.error) {
                         const errorCell = row.insertCell(1);
-                        errorCell.colSpan = 5; // 注意 colSpan 变为 5
+                        errorCell.colSpan = 6; // 注意 colSpan 变为 6
                         errorCell.innerHTML = `<span style="color: red;">处理失败: ${item.error}</span>`;
                         return;
                     }
 
                     row.insertCell(1).innerHTML = `<img src="${item.image_urls.input_processed}${cacheBuster}" alt="Input">`;
-                    row.insertCell(2).innerHTML = `<img src="${item.image_urls.input_annotated}${cacheBuster}" alt="Annotated">`;
-                    row.insertCell(3).innerHTML = `<img src="${item.image_urls.auto_balanced}${cacheBuster}" alt="Auto Balanced">`;
-                    row.insertCell(4).innerHTML = `<img src="${item.image_urls.classification}${cacheBuster}" alt="Classification">`;
+                    row.insertCell(2).innerHTML = `<img src="${item.image_urls.super_resolved}${cacheBuster}" alt="Super Resolved">`;
+                    row.insertCell(3).innerHTML = `<img src="${item.image_urls.input_annotated}${cacheBuster}" alt="Annotated">`;
+                    row.insertCell(4).innerHTML = `<img src="${item.image_urls.auto_balanced}${cacheBuster}" alt="Auto Balanced">`;
+                    row.insertCell(5).innerHTML = `<img src="${item.image_urls.classification}${cacheBuster}" alt="Classification">`;
 
                     const metrics = item.analysis;
+                    const pct = v => (v == null ? '—' : (v * 100).toFixed(2) + '%');
                     const metricsHtml = `
                     <div class="metrics">Status: ${metrics.status}
-Sea Blueness: ${(metrics.seaBlueness * 100).toFixed(2)}%
-Cloud Cover:  ${(metrics.cloudCoverage * 100).toFixed(2)}%
+Sea Blueness (visible): ${pct(metrics.seaBlueness)}
+Cloud Cover:  ${pct(metrics.cloudCoverage)}
+Blueness Index: ${pct(metrics.bluenessIndex)}
 --------------------
 Blue Pixels:  ${metrics.bluePixels || 0}
 Cloud Pixels: ${metrics.cloudPixels || 0}
-Yellow Pixels:${metrics.yellowPixels || 0}</div>`;
-                    row.insertCell(5).innerHTML = metricsHtml;
+Yellow Pixels:${metrics.yellowPixels || 0}
+Ocean Pixels: ${metrics.totalOceanPixels || 0}</div>`;
+                    row.insertCell(6).innerHTML = metricsHtml;
                 });
             }
         });

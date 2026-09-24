@@ -48,7 +48,7 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
         Image.fromarray(np.zeros_like(image_array, dtype=np.uint8)).save(
             os.path.join(output_dir, "04_hsv_classification.png")
         )
-        return {"status": "无数据", "seaBlueness": 0.0, "cloudCoverage": 0.0, "bluePercentage": 0.0, "yellowPercentage": 0.0}
+        return {"status": "无数据", "seaBlueness": None, "cloudCoverage": None, "bluenessIndex": None, "bluePercentage": None, "yellowPercentage": None}
 
     # --- 1. 转换到 HSV 颜色空间 ---
     hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
@@ -102,72 +102,34 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     Image.fromarray(classification_map_rgb).save(os.path.join(output_dir, "04_hsv_classification.png"))
 
     # --- 6. 计算各项指标 ---
-    # 修复：sea_blueness_score 的分母应该是总的海洋像素，而不仅仅是可见水体像素。
-    # 这确保了云层覆盖率会正确地降低海蓝分数。
-    sea_blueness_score = (blue_pixels / total_ocean_pixels) if total_ocean_pixels > 0 else 0.0
-    
+    # 口径拆分（metric_version=2）:
+    #   seaBlueness = blue / (blue + yellow)，即"可见水体"中蓝色占比，纯水色指标，与云量无关；
+    #   cloudCoverage = cloud / total_ocean，大气/云属性；
+    #   bluenessIndex = seaBlueness * (1 - cloudCoverage)，保留旧口径"云会压低海蓝分"的综合观感语义。
+    # 旧口径 (metric_version=1) 的 seaBlueness = blue / total_ocean，可与新指标互相换算:
+    #   v1_sea_blueness = blueness_index, v1_blue_percentage = sea_blueness * (1 - cloud_coverage)
+    visible_water_pixels = blue_pixels + yellow_pixels
+    sea_blueness = (blue_pixels / visible_water_pixels) if visible_water_pixels > 0 else None
+
     cloud_coverage = cloud_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
-    blue_percentage = blue_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0 # 该指标与sea_blueness现在一致
+    blueness_index = (
+        sea_blueness * (1.0 - cloud_coverage) if sea_blueness is not None else None
+    )
+    blue_percentage = blue_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
     yellow_percentage = yellow_pixels / total_ocean_pixels if total_ocean_pixels > 0 else 0.0
 
+    # 云量超过阈值时标记为 cloudy，便于查询端区分低质量样本（云主导场景下的水色值不可信）
+    status = "cloudy" if cloud_coverage >= config.CLOUD_COVERAGE_THRESHOLD else "completed"
+
     return {
-        "status": "completed",
-        "seaBlueness": sea_blueness_score,
+        "status": status,
+        "seaBlueness": sea_blueness,
         "cloudCoverage": cloud_coverage,
+        "bluenessIndex": blueness_index,
         "bluePercentage": blue_percentage,
         "yellowPercentage": yellow_percentage,
         "bluePixels": int(blue_pixels),
         "yellowPixels": int(yellow_pixels),
         "cloudPixels": int(cloud_pixels),
+        "totalOceanPixels": int(total_ocean_pixels),
     }
-
-def dehaze_dark_channel(image_bgr: np.ndarray, patch_size: int = 15, omega: float = 0.95, t0: float = 0.1) -> np.ndarray:
-    """
-    使用暗通道先验算法对图像进行去雾处理。
-    :param image_bgr: 输入的BGR格式图像 (OpenCV默认格式)。
-    :param patch_size: 用于计算暗通道的窗口大小。
-    :param omega: 保留的雾的比例，用于更自然的效果。
-    :param t0: 透射率的下限，防止结果过暗。
-    :return: 去雾后的BGR格式图像。
-    """
-    print("[Processor] Starting dehazing process using Dark Channel Prior...")
-    
-    # 1. 将图像转换为float类型，并归一化到[0, 1]
-    img_float = image_bgr.astype('float64') / 255
-
-    # 2. 计算暗通道
-    # 2.1 找到每个像素的最小颜色通道值
-    min_channel_img = np.min(img_float, axis=2)
-    # 2.2 使用一个矩形核在最小通道图上进行腐蚀操作，等效于在patch内取最小值
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (patch_size, patch_size))
-    dark_channel = cv2.erode(min_channel_img, kernel)
-
-    # 3. 估算大气光 A
-    # 将暗通道图像扁平化
-    flat_dark = dark_channel.ravel()
-    # 找到暗通道中最亮的0.1%像素的索引
-    search_idx = (-flat_dark).argsort()[:int(flat_dark.size * 0.001)]
-    # 将索引转换回二维坐标
-    rows, cols = np.unravel_index(search_idx, dark_channel.shape)
-    
-    A = np.zeros(3)
-    # 在原始图像中找到这些最亮像素，并取其平均值作为大气光
-    for i in range(3):
-        A[i] = np.mean(img_float[rows, cols, i])
-
-    # 4. 估算透射率 t(x)
-    transmission = 1 - omega * dark_channel / np.max(A)
-    # 对透射率进行限幅，防止其值过小导致图像过曝
-    transmission = np.maximum(transmission, t0)
-
-    # 5. 恢复无雾图像 J(x)
-    dehazed_img = np.empty(img_float.shape, img_float.dtype)
-    for i in range(3):
-        dehazed_img[:, :, i] = (img_float[:, :, i] - A[i]) / transmission + A[i]
-
-    # 将结果裁剪到[0, 1]范围，并转换回uint8格式
-    dehazed_img = np.clip(dehazed_img, 0, 1)
-    dehazed_img = (dehazed_img * 255).astype(np.uint8)
-    
-    print("[Processor] Dehazing process completed.")
-    return dehazed_img

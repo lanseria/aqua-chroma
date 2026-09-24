@@ -76,14 +76,22 @@ def run_analysis_and_persist(timestamp: int, db: Session) -> Dict[str, Any] | No
         else:
             # 调用图像处理流水线 (常规任务不传递 hsv_ranges_override)
             analysis_result = pipeline.process_image_pipeline(stitched_image, output_dir_path)
-            
-            # 从处理结果更新要持久化的数据
-            
-            analysis_data.update({
-                "status": analysis_result.get("status", "error"),
-                "sea_blueness": analysis_result.get("seaBlueness"),
-                "cloud_coverage": analysis_result.get("cloudCoverage"),
-            })
+
+            # 从处理结果更新要持久化的数据（含像素计数与指标版本，见 processor.analyze_ocean_color）
+            if analysis_result.get("status") == "error":
+                analysis_data["status"] = "error"
+            else:
+                analysis_data.update({
+                    "status": analysis_result.get("status", "error"),
+                    "metric_version": 2,
+                    "sea_blueness": analysis_result.get("seaBlueness"),
+                    "cloud_coverage": analysis_result.get("cloudCoverage"),
+                    "blueness_index": analysis_result.get("bluenessIndex"),
+                    "blue_pixels": analysis_result.get("bluePixels"),
+                    "yellow_pixels": analysis_result.get("yellowPixels"),
+                    "cloud_pixels": analysis_result.get("cloudPixels"),
+                    "total_ocean_pixels": analysis_result.get("totalOceanPixels"),
+                })
 
     # --- 持久化过程 ---
     result_to_persist = schemas.AnalysisResultCreate(**analysis_data)

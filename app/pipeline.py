@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import config, geo_utils, processor
+from . import config, geo_utils, processor, super_resolution
 
 def _auto_balance_color(image_bgr: np.ndarray) -> np.ndarray:
     """
@@ -62,17 +62,16 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
 
     analysis_result = {}
     try:
-        # --- 步骤 1: 根据配置放大图像 (预处理) ---
-        scale_factor = config.PRE_ANALYSIS_SCALE_FACTOR
-        if scale_factor > 1.0:
-            print(f"将图像放大 {scale_factor} 倍...")
-            image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            new_width = int(image_bgr.shape[1] * scale_factor)
-            new_height = int(image_bgr.shape[0] * scale_factor)
-            upscaled_bgr = cv2.resize(image_bgr, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-            image_to_process = Image.fromarray(cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2RGB))
-        else:
-            image_to_process = image
+        # --- 步骤 1: 输入图高清化 (预处理) ---
+        # 优先使用 Real-ESRGAN x4 超分；失败自动降级为 bicubic（见 super_resolution.enhance）。
+        scale_factor = config.ESRGAN_SCALE
+        print(f"将图像高清化 {scale_factor} 倍 (Real-ESRGAN)...")
+        image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        upscaled_rgb = super_resolution.enhance(np.array(image))
+        image_to_process = Image.fromarray(upscaled_rgb)
+        # 保存高清化中间图，便于对比高清化前后效果
+        superres_image_path = output_dir_path / "01b_superresolved.png"
+        image_to_process.save(superres_image_path)
         
         # --- 步骤 2: 保存预处理后的输入图 (干净无标注，与分析口径一致) ---
         image_array = np.array(image_to_process)

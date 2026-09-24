@@ -1,6 +1,9 @@
 # app/config.py
 
 import os
+from pathlib import Path
+
+import torch
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -77,7 +80,6 @@ MONITOR_LAT = "30"
 # 相比固定时间缓冲，窗口随季节逐日自动变化；可在线上通过环境变量调整而无需重建镜像。
 MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "10"))
 
-CLOUD_THRESHOLD = 200
 # 定义判定为“云层过厚”的云量覆盖阈值 (50%)
 CLOUD_COVERAGE_THRESHOLD = 0.5
 
@@ -120,6 +122,21 @@ COLOR_CLASSIFICATION_HSV_RANGES = {
 # 2.0 表示将图像的宽度和高度都放大到原来的2倍。
 # 推荐使用高质量的 Bicubic 插值算法，以获得更好的效果。
 PRE_ANALYSIS_SCALE_FACTOR = 2.0
+
+# --- Real-ESRGAN 图像超分（高清化）配置 ---
+# 开启后，预处理阶段用 Real-ESRGAN x4 超分替代 bicubic 放大，
+# 高清化结果保存为 01b_superresolved.png 并作为后续分析的输入。
+# 模型加载失败或权重缺失时自动降级为 bicubic，不阻断主流程。
+ESRGAN_ENABLED = str(os.getenv("ESRGAN_ENABLED", "true")).lower() in ("true", "1", "t")
+ESRGAN_MODEL_PATH = Path(os.getenv("ESRGAN_MODEL_PATH", "models/RealESRGAN_x4plus.pth"))
+ESRGAN_SCALE = 4
+# RRDBNet 结构参数（必须与官方 RealESRGAN_x4plus 权重一致，勿改）
+ESRGAN_NUM_FEAT = 64
+ESRGAN_NUM_GROW_CH = 32
+# 大图分块推理的块边长（像素），控制 CPU 推理的内存与单块耗时
+ESRGAN_TILE_SIZE = 256
+# torch CPU 推理线程数；0 表示使用默认值
+ESRGAN_TORCH_THREADS = int(os.getenv("ESRGAN_TORCH_THREADS", "0")) or torch.get_num_threads()
 
 
 # --- 定义调试图片的基准输出目录 ---

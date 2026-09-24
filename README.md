@@ -1,6 +1,6 @@
 # Aqua-Chroma Monitor (海蓝之心监控)
 
-**Aqua-Chroma Monitor** 是一个自动化的海洋颜色与状况监控系统。它能够定时从卫星数据源获取指定海域的图像，通过一系列图像处理和地理空间分析，计算出该区域的海蓝程度、云层覆盖率等关键指标，并提供一个动态更新的Web仪表盘进行可视化展示。
+**Aqua-Chroma Monitor** 是一个自动化的海洋颜色与状况监控系统。它以无人值守的方式定时从卫星数据源获取指定海域的图像，通过图像处理和地理空间分析计算出该区域的**海蓝程度**、**云层覆盖率**等关键指标，结果持久化到 PostgreSQL，并提供 REST API 与在线调试工具进行查询和算法调优。
 
 [![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Framework](https://img.shields.io/badge/framework-FastAPI-green.svg)](https://fastapi.tiangolo.com/)
@@ -10,32 +10,29 @@
 
 ## ✨ 功能特性
 
-- **自动化数据处理**: 无需人工干预，系统以设定的时间间隔（默认为10分钟）自动获取最新的卫星时间戳并进行分析。
-- **多数据源支持**: 可通过环境变量轻松切换不同的卫星图像数据源（例如，本地GIS服务器或公开的Zoom.earth服务）。
+- **自动化数据处理**: 无需人工干预，服务启动后立即执行一轮分析，之后每 10 分钟自动获取最新的卫星时间戳并进行分析入库。
+- **失败重试**: 对下载失败的时间戳，会在调度周期内间隔重试若干轮（等待瓦片数据上线），仍失败则留待下个周期继续。
+- **多数据源支持**: 可通过环境变量 `ACTIVE_DATA_SOURCE` 轻松切换不同的卫星图像数据源（`LOCAL_SERVER` 本地 GIS 服务器或 `ZOOM_EARTH` 公开服务）。
 - **精确地理分析**:
     - **精确裁剪**: 仅下载并处理目标地理区域（`TARGET_AREA`）的图像。
     - **陆地遮罩**: 使用 GeoJSON 文件精确移除图像中的陆地和岛屿部分，只分析海洋区域。
 - **多维度图像分析**:
-    - 智能判断 **黑夜** 时段并跳过分析。
+    - 基于太阳高度角（`MIN_SUN_ELEVATION_DEG`）智能判断 **黑夜** 时段并跳过分析。
     - 分析 **云层覆盖率**，并能识别 **云层过厚** 的情况。
     - 移除稀薄云层后，计算海洋的 **海蓝程度** 指标。
-- **动态Web仪表盘**:
-    - 使用 **FastAPI** 和 **Jinja2** 构建，前后端一体化。
-    - 顶部 **ECharts** 折线图展示“海蓝程度”的历史趋势。
-    - 采用 **无限滚动**（懒加载）方式展示历史数据卡片，优化性能。
-    - 使用动态着色的 **进度条** 直观展示每条记录的海蓝程度和云层覆盖率。
-- **调试友好**: 每次分析都会将处理过程中的中间图像（如原始图、蒙版图、云层图等）保存到本地，便于调试和验证算法效果。
-- **容器化部署**: 提供 `Dockerfile` 和 `docker compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
-- **灵活配置**: 核心参数（如目标区域、数据源等）均可通过环境变量或配置文件进行修改，无需改动代码。
+- **HSV 参数在线调优**: 内置网页调优工具（`/tools/hsv_tuner`），可视化调整云/蓝水/黄水的 HSV 阈值并实时查看分类效果，支持对测试图集批量重处理。
+- **调试友好**: 每次分析都会将处理过程中的中间图像（原始图、色彩均衡图、海洋蒙版图、HSV 分类图等）按阶段编号保存到本地，便于调试和验证算法效果。
+- **容器化部署**: 提供 `Dockerfile` 和 `docker-compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
+- **灵活配置**: 核心参数（数据源、HSV 阈值、目标区域、调度与重试参数等）均可通过环境变量或 `app/config.py` 修改，无需改动代码。
 
 ---
 
 ## 🛠️ 技术栈
 
-- **后端**: FastAPI, Uvicorn, APScheduler
+- **后端**: FastAPI, Uvicorn, APScheduler, SQLAlchemy (PostgreSQL)
 - **包管理**: uv
-- **数据处理**: OpenCV, NumPy, Pillow, Rasterio, Shapely
-- **前端**: HTML5, CSS3, JavaScript, ECharts
+- **数据处理**: OpenCV, NumPy, Pillow, Rasterio, Shapely, ephem（天文计算）
+- **模板**: Jinja2（调试工具页面）
 - **部署**: Docker, Docker Compose
 
 ---
@@ -56,24 +53,36 @@
 ### 2. 配置项目
 
 #### a. GeoJSON 文件
-获取您目标海域的 GeoJSON 文件，并将其放入 `data/geojson/` 目录。例如，您可以将其命名为 `my_sea_area.geojson`。
+
+项目自带 `geojson/china.geojson`。如需监控其他海域，请替换为您目标海域的 GeoJSON 文件，并修改 `app/config.py` 中的 `GEOJSON_PATH`。
 
 #### b. 核心配置 (`app/config.py`)
-打开 `app/config.py` 文件，根据您的需求修改以下关键部分：
 
-- **`TARGET_AREA`**: 设置您想要监控的目标海域的经纬度边界。
-- **`GEOJSON_PATH`**: 将路径修改为您自己的 GeoJSON 文件名，例如 `data/geojson/my_sea_area.geojson`。
+根据您的需求修改以下关键部分：
 
-#### c. 环境变量 (`.env`)
-在项目根目录下创建一个 `.env` 文件。这个文件用于控制容器的运行时行为。
+- **`TARGET_AREA`**: 目标海域的经纬度边界。
+- **`GEOJSON_PATH`**: GeoJSON 文件路径。
+- **`CITY_POINTS`**: 地图标注的城市点位（用于生成可视化标注图）。
+
+#### c. 环境变量 (`.env.production`)
+
+Docker 部署读取根目录下的 `.env.production` 文件（本地开发则使用 `.env`）：
 
 ```env
-# .env
+# 数据库连接（必需），格式: postgresql://user:password@host:5432/dbname
+DATABASE_URL=postgresql://user:password@host:5432/aqua_chroma
 
-# 设置当前激活的数据源
-# 可选值: "LOCAL_SERVER" 或 "ZOOM_EARTH"
+# 数据源: "LOCAL_SERVER" 或 "ZOOM_EARTH"（默认）
 ACTIVE_DATA_SOURCE=ZOOM_EARTH
+
+# 昼夜判断的最小太阳高度角（度，默认 10）
+MIN_SUN_ELEVATION_DEG=10
+
+# 启动时是否跳过首次分析任务（默认 false）
+SKIP_INITIAL_TASK=false
 ```
+
+> **注意**: `docker-compose.yml` 依赖名为 `shared-db-network` 的外部 Docker 网络（用于连接数据库容器），启动前请确认该网络已存在：`docker network create shared-db-network`。
 
 ### 3. 构建并启动服务
 
@@ -81,12 +90,22 @@ ACTIVE_DATA_SOURCE=ZOOM_EARTH
 
 ```bash
 docker compose up --build -d
-```- `--build`: 首次运行时，会根据 `Dockerfile` 构建镜像。
+```
+
+- `--build`: 首次运行时，会根据 `Dockerfile` 构建镜像。
 - `-d`: 在后台（detached mode）运行服务。
 
-### 4. 访问仪表盘
+### 4. 访问服务
 
-服务启动后，打开您的浏览器并访问: **`http://localhost:8010`**
+服务映射在宿主机 **`http://localhost:8010`**，可访问：
+
+| 地址 | 说明 |
+| --- | --- |
+| `/docs` | Swagger 交互式 API 文档，可直接在线调试所有接口 |
+| `/` | 健康检查（返回 JSON） |
+| `/api/results` | 查询数据库中全部分析结果 |
+| `/tools/hsv_tuner` | HSV 参数在线调优工具 |
+| `/data/output/{timestamp}/` | 浏览某次分析的中间处理图像 |
 
 ### 5. 查看日志和数据
 
@@ -95,9 +114,9 @@ docker compose up --build -d
   docker compose logs -f
   ```
 - **查看持久化数据**:
-  所有分析结果（`analysis_results.json`）和调试图片都存储在 Docker 卷 `aqua-data` 中。您可以通过以下命令查看其在主机上的具体位置：
+  所有分析结果存储在 PostgreSQL 数据库的单表 `analysis_results` 中（按时间戳 upsert）；调试图片存储在 Docker 卷 `aqua-chroma-data` 中。您可以通过以下命令查看其在主机上的具体位置：
   ```bash
-  docker volume inspect aqua-chroma_aqua-data
+  docker volume inspect aqua-chroma-data
   ```
 
 ---
@@ -105,45 +124,58 @@ docker compose up --build -d
 ## 🔧 本地开发 (不使用 Docker)
 
 ### 1. 环境准备
+
 - 安装 Python 3.12+
-- 推荐使用 `pyenv` 来管理 Python 版本。
-- 安装 `uv`:
+- 安装 [uv](https://docs.astral.sh/uv/) 包管理器:
   ```bash
   pip install uv
   ```
 
-### 2. 创建虚拟环境并安装依赖
+### 2. 安装依赖
+
 ```bash
-# 创建虚拟环境
-uv venv
-
-# 激活虚拟环境
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-# 安装依赖
-uv pip install -r requirements.txt
+uv sync --locked
 ```
-*(注意: 您可能需要先根据 `pyproject.toml` 生成 `requirements.txt` 文件: `uv pip freeze > requirements.txt`)*
 
-### 3. 安装系统依赖
+### 3. 配置环境变量
+
+在项目根目录创建 `.env` 文件（必需项见上文「环境变量」一节，至少需要 `DATABASE_URL`）。
+
+### 4. 安装系统依赖
+
 本地运行 `rasterio` 和 `opencv-python` 可能需要手动安装系统库，例如在 Debian/Ubuntu 上：
 ```bash
 sudo apt-get update
 sudo apt-get install libgdal-dev libgl1-mesa-glx
 ```
 
-### 4. 启动服务
+### 5. 启动服务
+
 ```bash
 uvicorn app.main:app --reload
 ```
-服务将在 `http://127.0.0.1:8000` 上运行。
 
-通过 hsv 工具调试
+服务将在 `http://127.0.0.1:8000` 上运行，启动后即可访问 `http://127.0.0.1:8000/docs` 查看和调试 API。
 
-https://www.qtccolor.com/secaiku/tool/convert?m=hsv
+> HSV 取值可借助在线换算工具辅助调试: https://www.qtccolor.com/secaiku/tool/convert?m=hsv
+
+---
+
+## 🌐 API 一览
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/` | 健康检查 |
+| GET | `/api/results` | 返回全部分析结果（海蓝程度、云层覆盖率、状态、时间戳等） |
+| GET | `/api/debug/analyze/{timestamp}` | 对指定时间戳手动重跑完整分析（下载→处理→upsert 入库） |
+| GET | `/tools/hsv_tuner` | HSV 参数在线调优页面 |
+| GET | `/tools/api/test_images` | 列出 `test_images/` 下的测试图 |
+| POST | `/tools/api/reprocess_all_hsv` | 用指定 HSV 参数批量重处理所有测试图 |
+
+静态资源挂载：
+
+- `/data` — 分析输出目录，每次分析的中间图像位于 `data/output/{timestamp}/`（`01_input_processed.png` 原图、`02_auto_balanced.png` 色彩均衡、`03_ocean_only.png` 海洋蒙版、`04_hsv_classification.png` HSV 分类）
+- `/test_results` — HSV 调优工具的批量输出结果
 
 ---
 
@@ -152,19 +184,27 @@ https://www.qtccolor.com/secaiku/tool/convert?m=hsv
 ```
 .
 ├── app/                  # FastAPI 应用核心代码
-│   ├── config.py         # 核心配置文件
-│   ├── downloader.py     # 卫星图像下载与裁剪模块
-│   ├── geo_utils.py      # 地理数据处理与蒙版生成
-│   ├── main.py           # FastAPI 应用主入口与调度任务
-│   └── processor.py      # 图像分析核心算法
-├── data/                 # 持久化数据目录
-│   ├── analysis_results.json # 存储所有分析结果
-│   ├── geojson/          # 存放 GeoJSON 文件
-│   └── output/           # 存放每次分析的调试图片
-├── static/               # 前端静态文件 (CSS, JS)
-├── templates/            # 前端 HTML 模板
-├── .env                  # 环境变量文件 (本地)
-├── docker compose.yml    # Docker Compose 配置文件
+│   ├── config.py         # 核心配置中心（数据源、HSV 阈值、地理范围、调度参数等）
+│   ├── main.py           # 应用主入口：路由、定时任务、核心分析编排
+│   ├── downloader.py     # 瓦片坐标计算、卫星图像下载与拼接裁剪
+│   ├── pipeline.py       # 图像预处理流水线（缩放→CLAHE→海洋蒙版→颜色分析）
+│   ├── processor.py      # 日夜判断、HSV 颜色分类、暗通道去雾
+│   ├── geo_utils.py      # GeoJSON 转像素蒙版（墨卡托投影）、地图标注
+│   ├── database.py       # SQLAlchemy 数据库连接（同步）
+│   ├── models.py         # ORM 模型（单表 analysis_results）
+│   ├── crud.py           # 数据读写（upsert 语义）
+│   ├── schemas.py        # Pydantic 请求/响应模型
+│   └── tools.py          # HSV 调优工具（挂载在 /tools 路由）
+├── geojson/              # GeoJSON 文件（海洋蒙版用）
+├── data/                 # 运行时数据目录
+│   └── output/           # 每次分析的中间图像（按时间戳分目录）
+├── templates/            # Jinja2 模板（HSV 调优工具页面）
+├── test_images/          # HSV 调优用的测试图片
+├── test_results/         # 调优工具输出结果
+├── scripts/              # 数据迁移等辅助脚本
+├── .env                  # 环境变量文件（本地开发）
+├── .env.production       # 环境变量文件（Docker 部署）
+├── docker-compose.yml    # Docker Compose 配置文件
 ├── Dockerfile            # Docker 镜像构建文件
 ├── pyproject.toml        # Python 项目定义与依赖
 └── README.md             # 项目说明文档
@@ -174,10 +214,10 @@ https://www.qtccolor.com/secaiku/tool/convert?m=hsv
 
 ## 💡 未来展望
 
+- [ ] 重新接通 Web 仪表盘前端（ECharts 趋势图 + 历史数据卡片）。
 - [ ] 集成更多卫星数据源（如 Sentinel, Landsat）。
 - [ ] 引入机器学习模型以提高云层识别的准确率。
-- [ ] 将分析结果存储到时序数据库（如 InfluxDB）以提高查询性能。
-- [ ] 开发更丰富的仪表盘功能，如多区域对比、数据导出等。
+- [ ] 开发更丰富的分析功能，如多区域对比、数据导出等。
 
 ---
 
