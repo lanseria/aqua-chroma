@@ -50,7 +50,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # --- Real-ESRGAN 超分权重 (models/*.pth 不入 git，构建时下载) ---
 # 如构建机无法访问 GitHub，可预先下载权重后放至目录中，将 ADD 替换为 COPY models/RealESRGAN_x4plus.pth models/
-ADD https://ghfast.top/https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth models/RealESRGAN_x4plus.pth
+# ADD https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth models/RealESRGAN_x4plus.pth
+COPY models/RealESRGAN_x4plus.pth models/
 
 
 # 拷贝整个项目代码
