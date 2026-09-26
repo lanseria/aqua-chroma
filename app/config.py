@@ -78,13 +78,13 @@ GEOJSON_PATH = "geojson/monitor_area.geojson"
 MASK_SUPERSAMPLE = 4
 TIME_ZONE = "Asia/Shanghai"
 # --- 动态日照分析配置 ---
-# 用于计算太阳高度角的观测点坐标 (用户指定: [122.2, 30])
-MONITOR_LON = "122.2"
-MONITOR_LAT = "30"
+# 用于计算太阳高度角的观测点坐标 (用户指定: [122.020814, 30.349802])
+MONITOR_LON = "122.020814"
+MONITOR_LAT = "30.349802"
 # 判定为有效白天的最小太阳高度角（度）。
 # 直接按该时间戳监测点上空的太阳高度角判断，低于阈值视为光照不足（夜间/晨昏），跳过分析。
 # 相比固定时间缓冲，窗口随季节逐日自动变化；可在线上通过环境变量调整而无需重建镜像。
-MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "10"))
+MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "15"))
 
 # 定义判定为“云层过厚”的云量覆盖阈值 (50%)
 CLOUD_COVERAGE_THRESHOLD = 0.5
