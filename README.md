@@ -54,7 +54,7 @@
 
 #### a. GeoJSON 文件
 
-项目自带 `geojson/china.geojson`。如需监控其他海域，请替换为您目标海域的 GeoJSON 文件，并修改 `app/config.py` 中的 `GEOJSON_PATH`。
+项目自带 `geojson/monitor_area.geojson`（浙江+上海子区划级行政边界，数据源为阿里 DataV GeoAtlas，海岸线精度满足杭州湾/舟山海域的小岛屿刻画）。更新或更换监测海域时，运行 `python scripts/update_geojson.py [省份adcode...]` 重新下载合并（如 `330000` 浙江、`310000` 上海），或替换为您自己的 GeoJSON 文件并修改 `app/config.py` 中的 `GEOJSON_PATH`。
 
 #### b. 核心配置 (`app/config.py`)
 

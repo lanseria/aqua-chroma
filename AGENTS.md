@@ -52,5 +52,5 @@ uv sync --locked
 - Python 3.12+，使用 `uv` 包管理器，清华 PyPI 镜像源
 - 图像分析中间结果保存在 `data/output/{timestamp}/` 目录下，编号前缀标识处理阶段（01-04）
 - `01_input_processed.png` 保持干净无标注，与分析口径一致；`01_input_annotated.png` 叠加陆地描边与城市点位标注，仅供可视化
-- GeoJSON 海洋蒙版在 `geojson/china.geojson`，陆地区域填充为黑色（mask=0）
+- 高精度海洋蒙版边界在 `geojson/monitor_area.geojson`（阿里 DataV 浙沪子区划级，用 `scripts/update_geojson.py` 刷新），陆地区域填充为黑色（mask=0）
 - `database.py` 使用同步 SQLAlchemy（非 async），尽管 `pyproject.toml` 中安装了 `sqlalchemy[asyncio]`
