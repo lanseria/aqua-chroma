@@ -92,7 +92,8 @@ def process_image_pipeline(image: Image.Image, output_dir_path: Path, hsv_ranges
         ocean_mask = geo_utils.create_ocean_mask(
             image_shape=image_to_process.size[::-1],
             geojson_path=config.GEOJSON_PATH,
-            bounds=config.TARGET_AREA
+            bounds=config.TARGET_AREA,
+            supersample=config.MASK_SUPERSAMPLE
         )
 
         # --- 步骤 4: 生成带地图标注的可视化图 (陆地描边 + 城市点位) ---

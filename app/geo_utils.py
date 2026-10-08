@@ -63,13 +63,26 @@ def _load_geojson_polygons(geojson_path: str) -> List[list]:
 
 # --- 核心蒙版创建函数 (使用新的坐标转换) ---
 
-def create_ocean_mask(image_shape: Tuple[int, int], geojson_path: str, bounds: Dict[str, float]) -> np.ndarray:
+def create_ocean_mask(
+    image_shape: Tuple[int, int],
+    geojson_path: str,
+    bounds: Dict[str, float],
+    supersample: int = 1,
+) -> np.ndarray:
     """
     根据GeoJSON文件在【最终裁剪图】上创建一个精确的海洋蒙版。
+    supersample > 1 时先在放大画布上填充多边形，再按面积均值缩小并二值化，
+    海岸线达到亚像素精度：小岛屿轮廓更平滑，像素级锯齿更少。
     对完全落在目标范围外的多边形做外包矩形预过滤，减少无效投影计算。
     """
     height, width = image_shape[:2]
-    mask = np.full((height, width), 255, dtype=np.uint8)
+    supersample = max(1, int(supersample))
+    # 内存保护：超采样画布超过约 1 亿像素时逐级降档
+    while supersample > 1 and (height * supersample) * (width * supersample) > 100_000_000:
+        supersample -= 1
+
+    ss_shape = (height * supersample, width * supersample)
+    mask = np.full(ss_shape, 255, dtype=np.uint8)
 
     for polygon in _load_geojson_polygons(geojson_path):
         # 外包矩形预过滤：跳过与目标范围完全不相交的多边形
@@ -80,12 +93,17 @@ def create_ocean_mask(image_shape: Tuple[int, int], geojson_path: str, bounds: D
 
         for ring in polygon:
             # 使用新的转换函数
-            pixel_coords = [latlon_to_final_pixel(lat, lon, bounds, image_shape) for lon, lat in ring]
+            pixel_coords = [latlon_to_final_pixel(lat, lon, bounds, ss_shape) for lon, lat in ring]
 
             pts = np.array(pixel_coords, dtype=np.int32)
             cv2.fillPoly(mask, [pts], 0)
 
-    print(f"已成功从 '{geojson_path}' 创建海洋蒙版。")
+    if supersample > 1:
+        mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_AREA)
+        # 多数表决二值化：子像素中海洋占多数则该像素为海洋
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    print(f"已成功从 '{geojson_path}' 创建海洋蒙版 (超采样 x{supersample})。")
     return mask
 
 def apply_mask(image: Image.Image, mask: np.ndarray) -> np.ndarray:

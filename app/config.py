@@ -69,16 +69,22 @@ TARGET_AREA = {
     "west": 121.102,
     "east": 122.871
 }
-GEOJSON_PATH = "geojson/china.geojson"
+# 海洋蒙版用行政区划边界（数据源: 阿里 DataV GeoAtlas，浙江+上海子区划级，
+# 海岸线精度远高于旧的全国级 china.geojson）。
+# 更新边界: python scripts/update_geojson.py [省份adcode...]
+GEOJSON_PATH = "geojson/monitor_area.geojson"
+# 蒙版渲染超采样倍率：先在高倍画布上填充多边形再缩小取阈值，
+# 使海岸线具有亚像素精度（小岛屿轮廓更平滑、不易整块丢失）。1 表示关闭。
+MASK_SUPERSAMPLE = 4
 TIME_ZONE = "Asia/Shanghai"
 # --- 动态日照分析配置 ---
-# 用于计算太阳高度角的观测点坐标 (用户指定: [122.2, 30])
-MONITOR_LON = "122.2"
-MONITOR_LAT = "30"
+# 用于计算太阳高度角的观测点坐标 (用户指定: [122.020814, 30.349802])
+MONITOR_LON = "122.020814"
+MONITOR_LAT = "30.349802"
 # 判定为有效白天的最小太阳高度角（度）。
 # 直接按该时间戳监测点上空的太阳高度角判断，低于阈值视为光照不足（夜间/晨昏），跳过分析。
 # 相比固定时间缓冲，窗口随季节逐日自动变化；可在线上通过环境变量调整而无需重建镜像。
-MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "10"))
+MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "15"))
 
 # 定义判定为“云层过厚”的云量覆盖阈值 (50%)
 CLOUD_COVERAGE_THRESHOLD = 0.5
