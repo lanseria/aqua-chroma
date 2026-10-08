@@ -1,6 +1,6 @@
 # Aqua-Chroma Monitor (海蓝之心监控)
 
-**Aqua-Chroma Monitor** 是一个自动化的海洋颜色与状况监控系统。它以无人值守的方式定时从卫星数据源获取指定海域的图像，通过图像处理和地理空间分析计算出该区域的**海蓝程度**、**云层覆盖率**等关键指标，结果持久化到 PostgreSQL，并提供 REST API 与在线调试工具进行查询和算法调优。
+**Aqua-Chroma Monitor** 是一个自动化的海洋颜色与状况监控系统。它以无人值守的方式定时从卫星数据源获取指定海域的图像，通过图像处理和地理空间分析计算出该区域的**海蓝程度**、**云层覆盖率**、**能见度**等关键指标，结果持久化到 PostgreSQL，并提供 REST API 与在线调试工具进行查询和算法调优。
 
 [![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Framework](https://img.shields.io/badge/framework-FastAPI-green.svg)](https://fastapi.tiangolo.com/)
@@ -20,6 +20,7 @@
     - 基于太阳高度角（`MIN_SUN_ELEVATION_DEG`）智能判断 **黑夜** 时段并跳过分析。
     - 分析 **云层覆盖率**，并能识别 **云层过厚** 的情况。
     - 移除稀薄云层后，计算海洋的 **海蓝程度** 指标。
+    - 估算 **海面能见度**（公里）：云量 ≥ `VISIBILITY_ZERO_CLOUD_THRESHOLD`（默认 50%）时视场被云顶遮蔽，直接记 0；晴好天气在无云水面上以暗通道亮度、局部 RMS 对比度、边缘纹理密度三项大气浑浊度代理量反演，并按 Koschmieder 定律（V = 3.912/β）折算为公里，输出"良好/中等/轻度霾雾/浓雾/云层遮蔽"等级。
 - **HSV 参数在线调优**: 内置网页调优工具（`/tools/hsv_tuner`），可视化调整云/蓝水/黄水的 HSV 阈值并实时查看分类效果，支持对测试图集批量重处理。
 - **调试友好**: 每次分析都会将处理过程中的中间图像（原始图、色彩均衡图、海洋蒙版图、HSV 分类图等）按阶段编号保存到本地，便于调试和验证算法效果。
 - **容器化部署**: 提供 `Dockerfile` 和 `docker-compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
@@ -166,7 +167,7 @@ uvicorn app.main:app --reload
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/` | 健康检查 |
-| GET | `/api/results` | 返回全部分析结果（海蓝程度、云层覆盖率、状态、时间戳等） |
+| GET | `/api/results` | 返回全部分析结果（海蓝程度、云层覆盖率、能见度、状态、时间戳等） |
 | GET | `/api/debug/analyze/{timestamp}` | 对指定时间戳手动重跑完整分析（下载→处理→upsert 入库） |
 | GET | `/tools/hsv_tuner` | HSV 参数在线调优页面 |
 | GET | `/tools/api/test_images` | 列出 `test_images/` 下的测试图 |
@@ -174,8 +175,18 @@ uvicorn app.main:app --reload
 
 静态资源挂载：
 
-- `/data` — 分析输出目录，每次分析的中间图像位于 `data/output/{timestamp}/`（`01_input_processed.png` 原图、`02_auto_balanced.png` 色彩均衡、`03_ocean_only.png` 海洋蒙版、`04_hsv_classification.png` HSV 分类）
+- `/data` — 分析输出目录，每次分析的中间图像位于 `data/output/{timestamp}/`（`01_input_processed.png` 原图、`02_auto_balanced.png` 色彩均衡、`03_ocean_only.png` 海洋蒙版、`04_hsv_classification.png` HSV 分类、`05_dark_channel.png` 暗通道/大气浑浊度调试图）
 - `/test_results` — HSV 调优工具的批量输出结果
+
+### 存量数据库迁移
+
+能见度功能为 `analysis_results` 表新增了 `visibility_km`、`visibility_level`、`haze_score` 三列。已有部署请执行一次性迁移脚本（幂等，可重复运行）：
+
+```bash
+uv run python scripts/migrate_add_visibility_columns.py
+```
+
+存量记录的能见度字段保持 NULL（表示早于该功能的记录），仪表盘对 NULL 不展示能见度行。
 
 ---
 
@@ -214,7 +225,6 @@ uvicorn app.main:app --reload
 
 ## 💡 未来展望
 
-- [ ] 重新接通 Web 仪表盘前端（ECharts 趋势图 + 历史数据卡片）。
 - [ ] 集成更多卫星数据源（如 Sentinel, Landsat）。
 - [ ] 引入机器学习模型以提高云层识别的准确率。
 - [ ] 开发更丰富的分析功能，如多区域对比、数据导出等。

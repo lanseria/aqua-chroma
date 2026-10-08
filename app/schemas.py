@@ -10,6 +10,9 @@ class AnalysisResultCreate(BaseModel):
     sea_blueness: Optional[float] = None
     cloud_coverage: Optional[float] = None
     blueness_index: Optional[float] = None
+    visibility_km: Optional[float] = None
+    visibility_level: Optional[str] = None
+    haze_score: Optional[float] = None
     blue_pixels: Optional[int] = None
     yellow_pixels: Optional[int] = None
     cloud_pixels: Optional[int] = None

@@ -198,11 +198,13 @@
 
                     const metrics = item.analysis;
                     const pct = v => (v == null ? '—' : (v * 100).toFixed(2) + '%');
+                    const visText = metrics.visibilityKm == null ? '—' : `${metrics.visibilityKm} km (${metrics.visibilityLevel})`;
                     const metricsHtml = `
                     <div class="metrics">Status: ${metrics.status}
 Sea Blueness (visible): ${pct(metrics.seaBlueness)}
 Cloud Cover:  ${pct(metrics.cloudCoverage)}
 Blueness Index: ${pct(metrics.bluenessIndex)}
+Visibility: ${visText}
 --------------------
 Blue Pixels:  ${metrics.bluePixels || 0}
 Cloud Pixels: ${metrics.cloudPixels || 0}
