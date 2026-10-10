@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getVisibilityColor = (km) => {
         if (km == null) return '#555555';
-        if (km <= 0.5) return '#4a4a4a'; // 云层遮蔽 (0)
+        if (km <= 0.5) return '#4a4a4a'; // 极端浑浊/浓雾（接近 0）
         if (km < 4) return '#8B0000';    // 浓雾 (暗红)
         if (km < 10) return '#DAA520';   // 轻度霾/雾 (goldenrod)
         if (km < 20) return '#87CEEB';   // 中等 (天空蓝)

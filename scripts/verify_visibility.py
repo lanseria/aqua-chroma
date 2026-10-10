@@ -36,7 +36,7 @@ def main():
         cloud_mask = cv2.inRange(hsv, np.array(ranges["CLOUD"]["lower"]), np.array(ranges["CLOUD"]["upper"]))
         cloud_ratio = np.count_nonzero(cloud_mask) / (mask.shape[0] * mask.shape[1])
 
-        result = processor.estimate_visibility(image, mask, cloud_ratio, cloud_mask=cloud_mask, output_dir=None)
+        result = processor.estimate_visibility(image, mask, cloud_mask=cloud_mask, output_dir=None)
         print(f"{name:<22} {cloud_ratio:>7.2%} "
               f"{str(result['visibilityKm']):>9} {result['visibilityLevel']:<10} "
               f"{str(result['hazeScore']):>7} {str(result['darkChannelBrightness']):>7} "

@@ -15,8 +15,9 @@ class AnalysisResult(Base):
     sea_blueness = Column(Float, nullable=True)
     cloud_coverage = Column(Float, nullable=True)
     blueness_index = Column(Float, nullable=True)
-    # 能见度估算（公里）：云量 ≥ VISIBILITY_ZERO_CLOUD_THRESHOLD 时记 0（云顶遮蔽）；
-    # 晴好天气按暗通道/对比度/边缘密度反演。NULL 表示无法估算（如无海洋像素）。
+    # 能见度估算（公里）：在无云水面上按暗通道亮度/局部RMS对比度/边缘密度反演；
+    # 无云占比不足时按比例混入含云顶的全场景测量，云越厚能见度自然越低（无硬截断）。
+    # NULL 表示无法估算（如无海洋像素）。历史数据中的 0 值为旧版"云层遮蔽"硬截断。
     visibility_km = Column(Float, nullable=True)
     visibility_level = Column(String, nullable=True)
     # 能见度中间代理量，便于事后审计与调参

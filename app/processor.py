@@ -45,23 +45,45 @@ def _visibility_edge_density(edge_map: np.ndarray, ocean_mask: np.ndarray) -> fl
     return float(np.count_nonzero(edge_map[ocean_mask > 0])) / ocean_pixels
 
 
-def estimate_visibility(image_rgb: np.ndarray, ocean_mask: np.ndarray, cloud_coverage: float,
+def _haze_proxies(dark_channel: np.ndarray, gray: np.ndarray, local_mean: np.ndarray,
+                  edges: np.ndarray, mask: np.ndarray) -> Optional[tuple]:
+    """在给定掩码上聚合三项大气浑浊度代理量。掩码内无像素时返回 None。
+
+    Returns:
+        (dark_brightness, contrast_score, edge_score)，各分量均已归一化到 0~1。
+    """
+    if np.count_nonzero(mask) == 0:
+        return None
+    # 暗通道亮度（雾/云顶会显著抬亮最小通道）
+    dark_brightness = float(dark_channel[mask > 0].mean()) / 255.0
+    # 局部 RMS 对比度（经验归一：晴好海面约 8~12 灰阶，浓雾场景 < 2）
+    rms_contrast = float(((gray - local_mean)[mask > 0] ** 2).mean() ** 0.5)
+    contrast_score = min(1.0, rms_contrast / 10.0)
+    # 细纹理边缘密度（经验归一：晴好海面边缘占比约 5%~8%，浓雾 < 0.5%）
+    edges_ocean = cv2.bitwise_and(edges, edges, mask=mask)
+    edge_score = min(1.0, _visibility_edge_density(edges_ocean, mask) / 0.05)
+    return dark_brightness, contrast_score, edge_score
+
+
+def estimate_visibility(image_rgb: np.ndarray, ocean_mask: np.ndarray,
                         cloud_mask: Optional[np.ndarray] = None,
                         output_dir: Optional[str] = None) -> Dict[str, Any]:
     """
     基于单张卫星图像估算海面水平能见度（公里）。
 
     原理：卫星图无法直接测能见度，改用大气光学代理量折算。
-    - 云层过厚（云量 ≥ config.VISIBILITY_ZERO_CLOUD_THRESHOLD）：视场被云顶完全占据，
-      海面不可见，卫星图上判断不了能见度，直接记 0。
     - 浓雾低云：雾在图像上表现为"亮而平"的大面积覆盖——暗通道（最小通道）被雾抬亮、
       局部 RMS 对比度被压平、细纹理边缘消失。三者加权得到大气浑浊度得分。
     - 晴好天气：暗通道接近 0（水面阴影/暗色水体），对比度高、海面纹理（波痕、云影、
       岛屿轮廓）清晰，浑浊度得分低，能见度取高值。
 
-    测量只在"无云水面"上进行（cloud_mask 提供时剔除云及其边缘膨胀区），
+    测量优先在"无云水面"上进行（cloud_mask 提供时剔除云及其边缘膨胀区），
     否则碎云自身的纹理会被误计为大气通透，导致能见度虚高。
-    无云水面占比低于 config.VISIBILITY_MIN_CLEAR_FRACTION 时同样按云层遮蔽记 0。
+
+    对云量不设"云厚直接记 0"的硬截断：无云水面占比低于
+    config.VISIBILITY_MIN_CLEAR_FRACTION 时，按占比将"整个海洋区域（含云顶）"
+    的测量结果线性混入。云顶亮而平，天然落在浑浊度高分端（低能见度），
+    且随云量增减连续变化——输出曲线呈自然过渡而非 0/高值之间的跳变。
 
     折算采用 Koschmieder 定律的经验离散化（V = 3.912 / β，β 为大气消光系数），
     用浑浊度得分非线性映射到 β，保证晴好 ≈ 20-35km、霾 ≈ 5-10km、雾 < 2km。
@@ -75,48 +97,40 @@ def estimate_visibility(image_rgb: np.ndarray, ocean_mask: np.ndarray, cloud_cov
         return {"visibilityKm": None, "visibilityLevel": "无数据", "hazeScore": None,
                 "darkChannelBrightness": None, "contrastScore": None, "edgeScore": None}
 
-    # --- 0. 云层过厚：海面被云顶遮挡，能见度无从谈起，直接 0 ---
-    if cloud_coverage >= config.VISIBILITY_ZERO_CLOUD_THRESHOLD:
-        return {"visibilityKm": 0.0, "visibilityLevel": "云层遮蔽",
-                "hazeScore": None, "darkChannelBrightness": None,
-                "contrastScore": None, "edgeScore": None}
-
-    # --- 0.1 测量区域 = 海洋 - 云（含边缘膨胀区，避免云的过渡像素混入）---
-    measure_mask = ocean_mask
-    if cloud_mask is not None:
-        cloud_dilated = cv2.dilate(cloud_mask, np.ones((9, 9), np.uint8))
-        measure_mask = cv2.bitwise_and(ocean_mask, cv2.bitwise_not(cloud_dilated))
-
-    clear_pixels = np.count_nonzero(measure_mask)
-    if clear_pixels < total_ocean_pixels * config.VISIBILITY_MIN_CLEAR_FRACTION:
-        # 剩余无云水面过少，样本不足以判断大气状况
-        return {"visibilityKm": 0.0, "visibilityLevel": "云层遮蔽",
-                "hazeScore": None, "darkChannelBrightness": None,
-                "contrastScore": None, "edgeScore": None}
-
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY).astype(np.float64)
 
-    # --- 1. 暗通道亮度（大气浑浊度代理）---
+    # --- 1. 全图代理量底图（各掩码只做聚合，避免重复的卷积/边缘计算）---
     # 窗口取 15px：图像已超分放大 4 倍，15px 对应原分辨率上可观的局部邻域
     patch = 15
     min_channel = cv2.erode(image_rgb.min(axis=2), np.ones((patch, patch), np.uint8))
     dark_channel = cv2.dilate(min_channel, np.ones((3, 3), np.uint8))
-    ocean_dark = dark_channel[measure_mask > 0]
-    dark_brightness = float(ocean_dark.mean()) / 255.0  # 归一化到 0~1
-
-    # --- 2. 局部 RMS 对比度（雾会压平明暗起伏）---
-    # 与暗通道同尺寸的局部均值图，取逐像素偏差的 RMS
+    # 与暗通道同尺寸的局部均值图，供逐像素 RMS 对比度使用
     local_mean = cv2.boxFilter(gray, ddepth=-1, ksize=(patch, patch))
-    ocean_contrast = float(((gray - local_mean)[measure_mask > 0] ** 2).mean() ** 0.5)
-    # 经验归一：晴好海面 RMS 对比度约 8~12 灰阶，浓雾场景 < 2
-    contrast_score = min(1.0, ocean_contrast / 10.0)
-
-    # --- 3. 细纹理边缘密度（雾天纹理消失）---
     edges = cv2.Canny(gray.astype(np.uint8), 40, 120)
-    edges_ocean = cv2.bitwise_and(edges, edges, mask=measure_mask)
-    edge_ratio = _visibility_edge_density(edges_ocean, measure_mask)
-    # 经验归一：晴好海面边缘占比约 5%~8%，浓雾 < 0.5%
-    edge_score = min(1.0, edge_ratio / 0.05)
+
+    full_proxies = _haze_proxies(dark_channel, gray, local_mean, edges, ocean_mask)
+    clear_proxies = full_proxies
+    clear_fraction = 1.0
+
+    # --- 2. 无云水面测量区（剔除云及边缘膨胀区，避免云的过渡像素混入）---
+    if cloud_mask is not None:
+        cloud_dilated = cv2.dilate(cloud_mask, np.ones((9, 9), np.uint8))
+        measure_mask = cv2.bitwise_and(ocean_mask, cv2.bitwise_not(cloud_dilated))
+        clear_pixels = np.count_nonzero(measure_mask)
+        if clear_pixels > 0:
+            clear_proxies = _haze_proxies(dark_channel, gray, local_mean, edges, measure_mask)
+            clear_fraction = clear_pixels / total_ocean_pixels
+
+    # --- 3. 按无云占比混合两套测量，让云量变化体现为能见度的连续过渡 ---
+    # 无云水面充足（≥ VISIBILITY_MIN_CLEAR_FRACTION）时完全信任无云水面的测量；
+    # 不足时按比例混入全场景（含云顶）测量：云越厚，权重越偏向云顶的低能见度读数。
+    if clear_fraction >= config.VISIBILITY_MIN_CLEAR_FRACTION:
+        w = 1.0
+    else:
+        w = clear_fraction / config.VISIBILITY_MIN_CLEAR_FRACTION
+    dark_brightness, contrast_score, edge_score = (
+        w * c + (1.0 - w) * f for c, f in zip(clear_proxies, full_proxies)
+    )
 
     # --- 4. 合成大气浑浊度得分（0=极通透，1=浓雾）---
     # 暗通道是气溶胶光学厚度最直接的代理，权重最高
@@ -139,11 +153,11 @@ def estimate_visibility(image_rgb: np.ndarray, ocean_mask: np.ndarray, cloud_cov
     else:
         level = "浓雾"
 
-    # --- 7. 调试图：暗通道图（雾区亮 = 大气浑浊），便于在线调参 ---
+    # --- 7. 调试图：暗通道图（雾/云区亮 = 大气浑浊），便于在线调参 ---
     if output_dir:
         dark_vis = np.clip(dark_channel * 2, 0, 255).astype(np.uint8)
         dark_rgb = cv2.cvtColor(dark_vis, cv2.COLOR_GRAY2RGB)
-        dark_rgb[measure_mask == 0] = 0  # 陆地与云置黑，与测量口径一致
+        dark_rgb[ocean_mask == 0] = 0  # 仅陆地置黑；云保留显示（云顶亮度参与浑浊度评估）
         Image.fromarray(dark_rgb).save(os.path.join(output_dir, "05_dark_channel.png"))
 
     return {"visibilityKm": round(visibility_km, 2), "visibilityLevel": level,
@@ -237,12 +251,10 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     # 云量超过阈值时标记为 cloudy，便于查询端区分低质量样本（云主导场景下的水色值不可信）
     status = "cloudy" if cloud_coverage >= config.CLOUD_COVERAGE_THRESHOLD else "completed"
 
-    # --- 7. 能见度估算（依赖云量判据：云厚直接记 0，晴好按大气浑浊度反演）---
-    # 传入云蒙版，让测量只在无云水面上进行，避免碎云纹理被误计为大气通透
+    # --- 7. 能见度估算（无云水面为主测量区；云顶测量按无云占比混入，输出连续过渡）---
     visibility_result = estimate_visibility(
         image_rgb=image_array,
         ocean_mask=ocean_mask,
-        cloud_coverage=cloud_coverage,
         cloud_mask=final_cloud_mask,
         output_dir=output_dir,
     )

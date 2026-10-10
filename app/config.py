@@ -90,14 +90,12 @@ MIN_SUN_ELEVATION_DEG = float(os.getenv("MIN_SUN_ELEVATION_DEG", "15"))
 CLOUD_COVERAGE_THRESHOLD = 0.5
 
 # --- 能见度估算配置 ---
-# 云量达到该阈值时，视场被云顶完全占据、海面不可见，卫星图上判断不了能见度，直接记 0 km。
-# 默认与 CLOUD_COVERAGE_THRESHOLD 一致（复用同一个"云主导"判据）。
-VISIBILITY_ZERO_CLOUD_THRESHOLD = float(os.getenv("VISIBILITY_ZERO_CLOUD_THRESHOLD", "0.5"))
 # 能见度上限（公里）。晴好天气下卫星图的反演上限受图像分辨率限制，
 # 超出部分没有区分度，封顶为 35 km（气象上的"极好能见度"量级）。
 VISIBILITY_MAX_KM = float(os.getenv("VISIBILITY_MAX_KM", "35"))
-# 无云水面像素占海洋总像素的最低比例。低于该值时剩余样本不足以判断大气状况，
-# 按"云层遮蔽"记 0 km（碎云场景下避免用极少量水面试出极端值）。
+# 无云水面像素占海洋总像素的参考比例。无云水面充足（≥该值）时完全信任无云水面的
+# 测量；低于该值时不做硬截断记 0，而是按占比把"整个海洋区域（含云顶）"的测量
+# 线性混入——云顶亮而平，天然落在低能见度端，云越厚权重越大，数值曲线随云量连续过渡。
 VISIBILITY_MIN_CLEAR_FRACTION = float(os.getenv("VISIBILITY_MIN_CLEAR_FRACTION", "0.3"))
 
 # --- 瓦片下载质量配置 ---
