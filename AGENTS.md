@@ -29,7 +29,7 @@ uv sync --locked
 ```
 
 关键模块职责：
-- **config.py** — 所有配置中心：数据源选择（环境变量 `ACTIVE_DATA_SOURCE`）、HSV 阈值、地理范围、调度参数、地图标注样式与城市点位（`CITY_POINTS`）
+- **config.py** — 所有配置中心：数据源选择（环境变量 `ACTIVE_DATA_SOURCE`）、HSV 阈值、分类图着色（`HSV_CLASSIFICATION_RENDER`）、地理范围、调度参数、地图标注样式与城市点位（`CITY_POINTS`）
 - **downloader.py** — 瓦片坐标计算、多源卫星图像下载与拼接裁剪
 - **pipeline.py** — 图像预处理编排（缩放→CLAHE色彩均衡→海洋蒙版→颜色分析，另生成带地图标注的 `01_input_annotated.png` 可视化图），被主任务和调试工具共享
 - **processor.py** — 日夜判断（ephem 天文算法）、HSV 阈值颜色分类、能见度估算（`estimate_visibility`：在无云水面上用暗通道亮度/局部RMS对比度/边缘密度三项浑浊度代理量按 Koschmieder 定律折算公里数；无云占比不足时按比例混入含云顶的全场景测量，云越厚能见度自然越低，不做硬截断记 0）
@@ -51,7 +51,7 @@ uv sync --locked
 
 - Python 3.12+，使用 `uv` 包管理器，清华 PyPI 镜像源
 - 图像分析中间结果保存在 `data/output/{timestamp}/` 目录下，编号前缀标识处理阶段（01-05）
-- `01_input_processed.png` 保持干净无标注，与分析口径一致；`01_input_annotated.png` 叠加陆地描边与城市点位标注，仅供可视化；`05_dark_channel.png` 为能见度估算的暗通道调试图（亮=大气浑浊，仅陆地置黑，云保留显示）
+- `01_input_processed.png` 保持干净无标注，与分析口径一致；`01_input_annotated.png` 叠加陆地描边与城市点位标注，仅供可视化；`05_dark_channel.png` 为能见度估算的暗通道调试图（亮=大气浑浊，仅陆地置黑，云保留显示）；`04_hsv_classification.png` 在分类判定不变的前提下，按类别内部明度分档着色（`config.HSV_CLASSIFICATION_RENDER`，默认 4 档 + 底部图例）
 - GeoJSON 海洋蒙版在 `geojson/china.geojson`，陆地区域填充为黑色（mask=0）
 - 高精度海洋蒙版边界在 `geojson/monitor_area.geojson`（阿里 DataV 浙沪子区划级，用 `scripts/update_geojson.py` 刷新），陆地区域填充为黑色（mask=0）
 - `database.py` 使用同步 SQLAlchemy（非 async），尽管 `pyproject.toml` 中安装了 `sqlalchemy[asyncio]`

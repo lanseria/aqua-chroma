@@ -64,6 +64,7 @@
 - **`TARGET_AREA`**: 目标海域的经纬度边界。
 - **`GEOJSON_PATH`**: GeoJSON 文件路径。
 - **`CITY_POINTS`**: 地图标注的城市点位（用于生成可视化标注图）。
+- **`HSV_CLASSIFICATION_RENDER`**: 分类结果图（`04_hsv_classification.png`）的着色方式——每个类别内部按像素明度分出多档深浅（云层薄→厚、海蓝浅→深、海黄淡→浓），不再用 3 种纯色平涂；可切换 `levels` 分档 / `gradient` 渐变、调整色阶列表与是否附图例。该配置只影响可视化，不改变分类判定与任何指标口径。
 
 #### c. 环境变量 (`.env.production`)
 
@@ -175,7 +176,7 @@ uvicorn app.main:app --reload
 
 静态资源挂载：
 
-- `/data` — 分析输出目录，每次分析的中间图像位于 `data/output/{timestamp}/`（`01_input_processed.png` 原图、`02_auto_balanced.png` 色彩均衡、`03_ocean_only.png` 海洋蒙版、`04_hsv_classification.png` HSV 分类、`05_dark_channel.png` 暗通道/大气浑浊度调试图）
+- `/data` — 分析输出目录，每次分析的中间图像位于 `data/output/{timestamp}/`（`01_input_processed.png` 原图、`02_auto_balanced.png` 色彩均衡、`03_ocean_only.png` 海洋蒙版、`04_hsv_classification.png` HSV 分类（类别内按明度分档着色，附图例）、`05_dark_channel.png` 暗通道/大气浑浊度调试图）
 - `/test_results` — HSV 调优工具的批量输出结果
 
 ### 存量数据库迁移

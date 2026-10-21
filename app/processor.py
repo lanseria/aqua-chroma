@@ -8,9 +8,9 @@ from typing import Dict, Any, Optional
 import ephem
 import numpy as np
 import cv2
-from PIL import Image # 导入Image模块
+from PIL import Image, ImageDraw # 导入Image、ImageDraw模块
 
-from . import config
+from . import config, geo_utils
 
 def is_night(timestamp: int) -> bool:
     """
@@ -167,15 +167,145 @@ def estimate_visibility(image_rgb: np.ndarray, ocean_mask: np.ndarray,
             "edgeScore": round(edge_score, 4)}
 
 
+# --- 分类图着色（仅可视化，不参与判定与指标计算） ---
+
+# 每个分类在图例中的中文方向说明；无中文字体时回退英文说明
+_CLASS_LEGEND_LABELS = {
+    "CLOUD": ("云层 薄→厚", "Cloud thin-thick"),
+    "BLUE_WATER": ("海蓝 浅→深", "Blue pale-deep"),
+    "YELLOW_WATER": ("海黄 淡→浓", "Yellow pale-dense"),
+}
+
+
+def _shade_intensities(hsv_image: np.ndarray, cloud_v_low: float,
+                       water_value_range) -> Dict[str, np.ndarray]:
+    """
+    按明度 V 计算每个像素在其类别内部的色阶坐标 (0=色阶起点, 1=色阶终点)。
+
+    色阶顺序与 config.palettes 一致：
+    - CLOUD: V 从判定阈值的下界映射到 255，即 灰(薄云/碎云) → 白(厚云/浓云)；
+    - 水体 : 用 water_value_range 把 V 映射为 "越暗越靠后"，即 浅 → 深
+      （海蓝由浅青到深蓝，海黄由浅沙黄到深褐）。
+
+    该坐标只用于选择色阶，不参与任何分类判定或指标计算。
+    """
+    v = hsv_image[:, :, 2].astype(np.float32)
+
+    cloud_lo = float(cloud_v_low)
+    cloud_u = (v - cloud_lo) / max(1.0, 255.0 - cloud_lo)
+
+    water_dark, water_light = (float(x) for x in water_value_range)
+    water_u = (water_light - v) / max(1.0, water_light - water_dark)
+
+    return {
+        "CLOUD": np.clip(cloud_u, 0.0, 1.0),
+        "BLUE_WATER": np.clip(water_u, 0.0, 1.0),
+        "YELLOW_WATER": np.clip(water_u, 0.0, 1.0),
+    }
+
+
+def _shade_palette_color(palette: np.ndarray, intensities: np.ndarray, mode: str) -> np.ndarray:
+    """
+    把 0~1 的深浅坐标映射成 RGB 颜色。
+
+    mode="levels"  : 按坐标落入的档位取该档纯色（档与档之间界限清晰）；
+    mode="gradient": 在相邻色阶之间线性插值（连续渐变）。
+    """
+    n = len(palette)
+    if n == 1:
+        return np.repeat(palette[:1], len(intensities), axis=0)
+
+    if mode == "gradient":
+        pos = intensities * (n - 1)
+        lower = np.clip(np.floor(pos).astype(np.int32), 0, n - 2)
+        frac = (pos - lower)[:, None]
+        return palette[lower] * (1.0 - frac) + palette[lower + 1] * frac
+
+    # levels: [0,1) 等分为 n 档，1.0 归入最后一档
+    index = np.clip(np.floor(intensities * n).astype(np.int32), 0, n - 1)
+    return palette[index]
+
+
+def _append_legend(image_rgb: np.ndarray) -> np.ndarray:
+    """
+    在分类图下方追加色阶图例：每个分类一排由浅到深（由弱到强）的色块 + 方向说明。
+    图例高度与字号按图像高度自适应；中文字体缺失时自动回退英文说明。
+    """
+    palettes = config.HSV_CLASSIFICATION_RENDER["palettes"]
+    h, w = image_rgb.shape[:2]
+    legend_h = max(28, int(round(h * 0.11)))
+    font_size = max(9, int(round(h / 36)))
+
+    canvas = Image.new("RGB", (w, h + legend_h), (30, 30, 34))
+    canvas.paste(Image.fromarray(image_rgb), (0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.line([(0, h), (w, h)], fill=(96, 96, 96), width=1)
+
+    font = geo_utils.load_cjk_font(font_size, config.FONT_CANDIDATES)
+    col_w = w / float(len(palettes))
+    label_top = h + int(round(legend_h * 0.12))
+    swatch_top = label_top + font_size + 3
+    swatch_h = max(6, h + legend_h - swatch_top - int(round(legend_h * 0.14)))
+
+    for i, (class_key, palette) in enumerate(palettes.items()):
+        x0 = i * col_w
+        label_cn, label_en = _CLASS_LEGEND_LABELS.get(class_key, (class_key, class_key))
+        draw.text((x0 + 5, label_top), label_cn if font is not None else label_en,
+                  fill=(235, 235, 235), font=font)
+
+        pad = 5 if col_w >= 60 else max(1, int(col_w * 0.08))
+        swatch_w = max(1.0, (col_w - pad * 2) / max(1, len(palette)))
+        for j, color in enumerate(palette):
+            sx0 = int(round(x0 + pad + j * swatch_w))
+            sx1 = max(sx0, int(round(x0 + pad + (j + 1) * swatch_w)) - 1)
+            draw.rectangle([sx0, swatch_top, sx1, swatch_top + swatch_h],
+                           fill=tuple(int(c) for c in color))
+    return np.array(canvas)
+
+
+def _render_classification_map(hsv_image: np.ndarray, class_masks: Dict[str, np.ndarray],
+                               output_path: str, cloud_v_low: float) -> np.ndarray:
+    """
+    绘制 HSV 分类结果图：先按类别取色，再在类别内部按深浅坐标取不同色阶。
+
+    class_masks 决定像素归属（与原判定逻辑完全一致），着色只发生在已归类像素上，
+    不会改变任何像素的分类结果或指标统计口径。
+    """
+    render_cfg = config.HSV_CLASSIFICATION_RENDER
+    mode = str(render_cfg.get("mode", "levels")).lower()
+    water_range = render_cfg.get("water_value_range", [20, 140])
+
+    intensities = _shade_intensities(hsv_image, cloud_v_low, water_range)
+    output = np.zeros(hsv_image.shape[:2] + (3,), dtype=np.uint8)
+
+    for class_key, mask in class_masks.items():
+        if not np.any(mask):
+            continue
+        palette = np.asarray(render_cfg["palettes"][class_key], dtype=np.float32)
+        colors = _shade_palette_color(palette, intensities[class_key][mask > 0], mode)
+        output[mask > 0] = np.clip(colors, 0, 255).astype(np.uint8)
+
+    if render_cfg.get("legend", True):
+        output = _append_legend(output)
+    Image.fromarray(output).save(output_path)
+    return output
+
+
 def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
     """
     使用基于 HSV 颜色范围的阈值法对海洋图像进行分类和分析。
+    分类判定（云 / 海蓝 / 海黄）保持不变；分类结果图 04_hsv_classification.png
+    在类别内部按像素明度分出深浅色阶（见 config.HSV_CLASSIFICATION_RENDER），
+    仅影响可视化，不改变指标口径。
     新增: hsv_ranges_override 参数，用于接收临时的HSV阈值。
     """
     total_ocean_pixels = np.count_nonzero(ocean_mask)
     if total_ocean_pixels == 0:
-        # 即使没有海洋像素，也写出一张全黑分类图，保证输出目录的产物文件齐全
-        Image.fromarray(np.zeros_like(image_array, dtype=np.uint8)).save(
+        # 即使没有海洋像素，也写出一张全黑分类图（附图例），保证输出目录的产物文件齐全
+        blank = np.zeros_like(image_array, dtype=np.uint8)
+        if config.HSV_CLASSIFICATION_RENDER.get("legend", True):
+            blank = _append_legend(blank)
+        Image.fromarray(blank).save(
             os.path.join(output_dir, "04_hsv_classification.png")
         )
         return {"status": "无数据", "seaBlueness": None, "cloudCoverage": None, "bluenessIndex": None, "bluePercentage": None, "yellowPercentage": None}
@@ -224,12 +354,18 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     print("--------------------------------------------------\n")
 
     # --- 5. 生成并保存分类调试图 ---
-    classification_map_bgr = np.zeros_like(image_array, dtype=np.uint8)
-    classification_map_bgr[final_cloud_mask > 0] = (255, 255, 255)  # 白色
-    classification_map_bgr[final_blue_mask > 0] = (138, 89, 0)     # 蓝色 (BGR)
-    classification_map_bgr[final_yellow_mask > 0] = (9, 117, 161)  # 棕色 (BGR)
-    classification_map_rgb = cv2.cvtColor(classification_map_bgr, cv2.COLOR_BGR2RGB)
-    Image.fromarray(classification_map_rgb).save(os.path.join(output_dir, "04_hsv_classification.png"))
+    # 判定结果（掩码）不变，仅着色方式改变：每个类别内部按像素明度细分深浅色阶，
+    # 不再用 3 种纯色平涂。着色与图例参数见 config.HSV_CLASSIFICATION_RENDER。
+    _render_classification_map(
+        hsv_image=hsv_image,
+        class_masks={
+            "CLOUD": final_cloud_mask,
+            "BLUE_WATER": final_blue_mask,
+            "YELLOW_WATER": final_yellow_mask,
+        },
+        output_path=os.path.join(output_dir, "04_hsv_classification.png"),
+        cloud_v_low=cloud_lower[2],
+    )
 
     # --- 6. 计算各项指标 ---
     # 口径拆分（metric_version=2）:
