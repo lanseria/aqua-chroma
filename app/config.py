@@ -145,7 +145,7 @@ HSV_CLASSIFICATION_RENDER = {
     # "gradient" = 在色阶之间连续渐变（更平滑，但不再有明确分档）
     "mode": "levels",
     # 是否在图片下方追加色阶图例（每类的深浅方向说明，中文字体缺失时回退英文）
-    "legend": True,
+    "legend": False,
     # 水体明度的深浅映射区间：V >= 上限视为该类"最浅"端，V <= 下限视为"最深"端。
     # 仅影响 BLUE_WATER / YELLOW_WATER；云层用判定阈值的 V 下界映射到 255。
     "water_value_range": [20, 140],
