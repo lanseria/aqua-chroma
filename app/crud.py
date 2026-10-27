@@ -1,6 +1,8 @@
 # app/crud.py
 from datetime import datetime, timezone
+from typing import Dict, List, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from . import models, schemas
 
@@ -87,3 +89,86 @@ def delete_app_setting(db: Session, key: str) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+# --- 预览源类型标签（preview_tags 表）---
+# 用于给 data/output/<timestamp>/ 的分析结果打 tag（如 晴朗天空/多云/薄雾），
+# 把真实分析结果当作分类型测试样本，颜色阈值调优页可按 tag 筛选预览源。
+
+def get_preview_tags(db: Session, timestamp: int) -> List[str]:
+    """获取某个时间点的全部 tag（按 tag 升序）。"""
+    rows = (
+        db.query(models.PreviewTag.tag)
+        .filter(models.PreviewTag.timestamp == timestamp)
+        .order_by(models.PreviewTag.tag.asc())
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
+def get_preview_tags_map(db: Session, timestamps: List[int]) -> Dict[int, List[str]]:
+    """
+    批量获取多个时间点的 tag（一次查询，避免 N+1）。
+
+    返回 {timestamp: [tag, ...]}；没有 tag 的时间点也以空列表出现，方便调用方直接索引。
+    """
+    result: Dict[int, List[str]] = {ts: [] for ts in timestamps}
+    if not timestamps:
+        return result
+
+    rows = (
+        db.query(models.PreviewTag.timestamp, models.PreviewTag.tag)
+        .filter(models.PreviewTag.timestamp.in_(timestamps))
+        .order_by(models.PreviewTag.timestamp.asc(), models.PreviewTag.tag.asc())
+        .all()
+    )
+    for ts, tag in rows:
+        result.setdefault(ts, []).append(tag)
+    return result
+
+
+def list_preview_tag_counts(db: Session) -> List[Tuple[str, int]]:
+    """
+    全库 tag 使用统计：返回 [(tag, 打该 tag 的时间戳数), ...]。
+
+    排序：数量降序，数量相同再按 tag 升序（中文按 Unicode 码点，结果确定）。
+    """
+    rows = (
+        db.query(
+            models.PreviewTag.tag,
+            func.count(func.distinct(models.PreviewTag.timestamp)),
+        )
+        .group_by(models.PreviewTag.tag)
+        .all()
+    )
+    counts = [(tag, int(count)) for tag, count in rows]
+    counts.sort(key=lambda item: (-item[1], item[0]))
+    return counts
+
+
+def set_preview_tags(db: Session, timestamp: int, tags: List[str]) -> List[str]:
+    """
+    替换式保存某个时间点的 tag：先删除该时间点全部行，再插入新 tag（单事务提交）。
+
+    入参 tags 应已由 API 层校验/去重；这里再做一次保序去重，
+    确保同一 (timestamp, tag) 不会重复插入（表上也有唯一约束兜底）。
+    返回保存后该时间点的 tag 列表（按 tag 升序）。
+    """
+    normalized: List[str] = []
+    seen = set()
+    for tag in tags:
+        if tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+
+    db.query(models.PreviewTag).filter(
+        models.PreviewTag.timestamp == timestamp
+    ).delete(synchronize_session=False)
+
+    now = datetime.now(timezone.utc)
+    for tag in normalized:
+        db.add(models.PreviewTag(timestamp=timestamp, tag=tag, created_at=now))
+    db.commit()
+    print(f"[CRUD] Set preview tags for {timestamp}: {normalized}")
+    return get_preview_tags(db, timestamp)

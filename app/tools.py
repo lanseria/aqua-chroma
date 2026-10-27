@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,7 +16,8 @@ templates = Jinja2Templates(directory="templates")
 
 # 导入新的、独立的 pipeline 模块
 from .pipeline import process_image_pipeline
-from . import settings_store, threshold_preview
+from . import config, crud, settings_store, threshold_preview
+from .database import SessionLocal
 
 # 定义测试图片和结果的目录
 TEST_IMAGE_DIR = Path("test_images")
@@ -49,6 +50,73 @@ class ColorThresholdsUpdateRequest(BaseModel):
 class ThresholdPreviewRequest(BaseModel):
     source: str
     ranges: Optional[Dict[str, Any]] = None
+
+
+class PreviewTagsUpdateRequest(BaseModel):
+    # 故意用 Any + 默认 None 接收：timestamp 非 int/bool、tags 非数组、字段缺失等
+    # 结构问题也要转成我们的 400 + 中文 details，而不是 Pydantic 的 422
+    #（若声明为 int / List[Any]，bool 会被强转、非数组/缺失会在进入校验前被拦截）。
+    timestamp: Any = None
+    tags: Any = None
+
+
+# --- 预览源 tag 校验 ---
+
+def _validate_preview_tags_payload(timestamp: Any, tags: Any) -> Tuple[List[str], List[str]]:
+    """
+    校验「保存某个分析结果时间点的 tag」请求。
+
+    收集全部错误（不是遇到第一个就返回），错误信息为中文，供前端逐条展示。
+    tags 去重时保留首次出现顺序。
+
+    Returns:
+        (规范化后的 tags, 错误列表)；错误列表非空时调用方返回 400。
+    """
+    errors: List[str] = []
+
+    # 1. 时间戳：必须是 int（bool 不算），且该时间点有可用的分析结果图像
+    if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+        errors.append(f"timestamp 必须是整数（UNIX 秒），实际为 {timestamp!r}")
+    else:
+        if not threshold_preview.analysis_source_exists(timestamp):
+            artifact = threshold_preview.analysis_artifact_path(timestamp)
+            errors.append(
+                f"时间戳 {timestamp} 没有可用的分析结果图像（{artifact.as_posix()} 不存在）"
+            )
+
+    # 2. tags：必须是 list，元素为 strip 后非空、长度受限的字符串
+    normalized: List[str] = []
+    if not isinstance(tags, list):
+        errors.append(f"tags 必须是字符串数组（list），实际为 {type(tags).__name__}")
+        return normalized, errors
+
+    seen = set()
+    for index, item in enumerate(tags):
+        if not isinstance(item, str):
+            errors.append(f"tags[{index}] 必须是字符串，实际为 {item!r}")
+            continue
+        tag = item.strip()
+        if not tag:
+            errors.append(f"tags[{index}] 不能为空字符串")
+            continue
+        if len(tag) > config.PREVIEW_TAG_MAX_LENGTH:
+            errors.append(
+                f"tags[{index}] 长度 {len(tag)} 超过上限 "
+                f"{config.PREVIEW_TAG_MAX_LENGTH} 个字符：{tag}"
+            )
+            continue
+        if tag in seen:
+            continue  # 重复项静默去重，保留首次出现顺序
+        seen.add(tag)
+        normalized.append(tag)
+
+    if len(normalized) > config.PREVIEW_TAG_MAX_COUNT:
+        errors.append(
+            f"单个时间点最多 {config.PREVIEW_TAG_MAX_COUNT} 个 tag"
+            f"（去重后实际 {len(normalized)} 个）"
+        )
+
+    return normalized, errors
 
 
 @router.get("/hsv_tuner", response_class=HTMLResponse)
@@ -150,7 +218,7 @@ async def get_color_thresholds_page(request: Request):
 
 
 # 注意：以下接口内部可能涉及数据库读写或图像计算，用同步 def 让 FastAPI 放入
-# 线程池执行，避免阻塞事件循环（尤其是首次预览 test_images 时的一次性超分）。
+# 线程池执行，避免阻塞事件循环。
 @router.get("/api/color_thresholds")
 def api_get_color_thresholds():
     """读取当前生效的 HSV 阈值、兜底默认值、来源与可用通道范围。"""
@@ -196,8 +264,59 @@ def api_reset_color_thresholds():
 
 @router.get("/api/preview_sources")
 def api_preview_sources():
-    """列出实时预览可用的图像源（最新分析结果优先，其次 test_images 样本）。"""
+    """
+    列出全部可预览的分析结果时间点（时间倒序、含各自 tags），
+    以及全库 tag 统计、页面录入候选、总数/截断标记。
+    """
     return {"success": True, "data": threshold_preview.list_sources()}
+
+
+@router.get("/api/preview_tags")
+def api_preview_tags():
+    """列出全库预览源 tag 的使用统计（打该 tag 的时间点数量）与页面录入候选。"""
+    try:
+        with SessionLocal() as db:
+            counts = crud.list_preview_tag_counts(db)
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": f"读取预览标签失败: {exc}",
+        })
+
+    return {"success": True, "data": {
+        "tags": [{"tag": tag, "count": int(count)} for tag, count in counts],
+        "presets": list(config.PREVIEW_TAG_PRESETS),
+    }}
+
+
+@router.post("/api/preview_tags")
+def api_update_preview_tags(payload: PreviewTagsUpdateRequest):
+    """
+    替换式保存某个分析结果时间点的 tag（tags=[] 表示清空该时间点全部 tag）。
+
+    校验不通过 -> 400 + 逐条中文 details；数据库写入失败 -> 500。
+    """
+    normalized, errors = _validate_preview_tags_payload(payload.timestamp, payload.tags)
+    if errors:
+        return JSONResponse(status_code=400, content={
+            "success": False,
+            "error": "预览标签不合法",
+            "details": errors,
+        })
+
+    try:
+        with SessionLocal() as db:
+            saved = crud.set_preview_tags(db, payload.timestamp, normalized)
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": f"保存预览标签失败: {exc}",
+        })
+
+    return {"success": True, "data": {
+        "timestamp": payload.timestamp,
+        "tags": saved,
+    }}
 
 
 @router.post("/api/threshold_preview")

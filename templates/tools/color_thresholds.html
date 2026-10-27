@@ -580,11 +580,11 @@
         .badge[data-status="cloudy"] { border-color: #d3dfe9; background: #eef3f8; color: #45586d; }
         .badge-latency { border-color: #cfe3fa; background: var(--accent-soft); color: #2f6db3; }
 
-        .source-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+        .source-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .field-label { font-size: 12px; font-weight: 600; color: var(--ink-soft); min-width: 44px; }
-        .source-select {
-            flex: 1 1 280px;
-            min-width: 220px;
+        .dt-input {
+            flex: 1 1 240px;
+            min-width: 200px;
             max-width: 100%;
             min-height: 34px;
             padding: 5px 10px;
@@ -593,10 +593,206 @@
             background: #fff;
             color: var(--ink);
             font: inherit;
+            font-family: var(--mono);
             font-size: 12.5px;
+            font-variant-numeric: tabular-nums;
+        }
+        .dt-input:hover:not(:disabled) { border-color: #a9bccd; }
+        .dt-input:disabled { background: #f5f8fb; color: var(--muted); }
+        .dt-hint { margin-top: 7px; }
+        .dt-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+        .dt-suggestion {
+            min-height: 28px;
+            padding: 3px 10px;
+            border: 1px solid #cfe3fa;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: #2f6db3;
+            font: inherit;
+            font-family: var(--mono);
+            font-size: 11px;
             cursor: pointer;
         }
-        .source-select:disabled { background: #f5f8fb; color: var(--muted); cursor: progress; }
+        .dt-suggestion:hover { border-color: #9fc6f5; background: #e0efff; }
+        .dt-suggestion:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        .source-meta {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            font-size: 11.5px;
+            color: var(--muted);
+        }
+        .source-total { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+        .source-current { font-weight: 600; color: var(--ink-soft); }
+
+        .tag-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; min-height: 26px; }
+        .tag-filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            min-height: 26px;
+            padding: 2px 10px;
+            border: 1px solid var(--line-strong);
+            border-radius: 999px;
+            background: #fff;
+            color: var(--ink-soft);
+            font: inherit;
+            font-size: 11.5px;
+            cursor: pointer;
+        }
+        .tag-filter-chip:hover { background: #f4f8fc; border-color: #b9cbdd; }
+        .tag-filter-chip.is-active { background: var(--accent-soft); border-color: #9fc6f5; color: #0b5cad; font-weight: 700; }
+        .tag-filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .tag-filter-count {
+            font-family: var(--mono);
+            font-size: 10.5px;
+            color: var(--muted);
+            background: #eef3f8;
+            border-radius: 999px;
+            padding: 0 5px;
+        }
+        .tag-filter-chip.is-active .tag-filter-count { background: #fff; color: #0b5cad; }
+
+        .source-list-wrap {
+            position: relative;
+            margin-top: 8px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: var(--panel-2);
+            overflow: hidden;
+        }
+        .source-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: 224px;
+            margin: 0;
+            padding: 4px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        .source-list::-webkit-scrollbar { width: 8px; }
+        .source-list::-webkit-scrollbar-thumb { background: #d5e0ea; border-radius: 999px; }
+        .source-list::-webkit-scrollbar-track { background: transparent; }
+        .source-list-wrap[aria-busy="true"] .source-list { opacity: .55; }
+        .source-item {
+            display: grid;
+            grid-template-columns: 112px minmax(0, 1fr);
+            gap: 8px;
+            align-items: center;
+            min-height: 32px;
+            padding: 5px 8px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .source-item:hover { background: #f2f8ff; border-color: #dbeafe; }
+        .source-item.is-selected { background: var(--accent-soft); border-color: #a9d0fa; box-shadow: inset 3px 0 0 var(--accent); }
+        .source-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .source-item-time {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .source-item.is-selected .source-item-time { font-weight: 700; color: #0b4c8c; }
+        .source-item-tags { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
+        .source-tag-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 1px 7px;
+            border: 1px solid #d7e4f2;
+            border-radius: 999px;
+            background: #f2f7fd;
+            color: #3c5a78;
+            font-size: 10.5px;
+            white-space: nowrap;
+        }
+        .source-tag-none { font-size: 10.5px; color: var(--muted-2); }
+        .source-empty { margin: 0; padding: 18px 12px; text-align: center; font-size: 12px; color: var(--muted); }
+        .source-truncated { margin: 6px 0 0; font-size: 11px; color: var(--warn); }
+
+        /* ---------- 时间点标签编辑 ---------- */
+        .badge-tag-dirty { border-color: #f3d7a8; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+        .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+        .tag-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 6px 3px 10px;
+            border: 1px solid #cfe3fa;
+            border-radius: 999px;
+            background: #eef5ff;
+            color: #245a92;
+            font-size: 12px;
+        }
+        .tag-chip-remove {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: #3f6fa0;
+            font: inherit;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .tag-chip-remove:hover { background: #d7e8fb; color: #8f1f1f; }
+        .tag-chip-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .tag-empty { margin: 0 0 2px; font-size: 11.5px; color: var(--muted-2); }
+        .tag-add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+        .tag-input {
+            flex: 1 1 220px;
+            min-width: 180px;
+            max-width: 100%;
+            min-height: 32px;
+            padding: 4px 10px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--ink);
+            font: inherit;
+            font-size: 12.5px;
+        }
+        .tag-input:hover:not(:disabled) { border-color: #a9bccd; }
+        .tag-input:disabled { background: #f5f8fb; color: var(--muted); }
+        .tag-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+        .tag-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .tag-preset {
+            min-height: 28px;
+            padding: 3px 10px;
+            border: 1px dashed var(--line-strong);
+            border-radius: 999px;
+            background: #fff;
+            color: var(--ink-soft);
+            font: inherit;
+            font-size: 11.5px;
+            cursor: pointer;
+        }
+        .tag-preset:hover:not(:disabled) { border-color: #9fc6f5; background: var(--accent-soft); color: #0b5cad; }
+        .tag-preset:disabled { opacity: .45; cursor: not-allowed; border-style: solid; }
+        .tag-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .tag-editor-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            padding-top: 9px;
+            border-top: 1px dashed var(--line);
+        }
+        .tag-validation { margin: 0; min-height: 16px; font-size: 11.5px; color: var(--danger); }
         .preview-hint {
             display: flex;
             align-items: flex-start;
@@ -944,15 +1140,53 @@
                     <span id="dims-badge" class="badge badge-mono" hidden>— × — px</span>
                 </div>
             </div>
-            <div class="source-row">
-                <label class="field-label" for="source-select">预览源</label>
-                <select class="source-select" id="source-select" disabled>
-                    <option value="">正在读取预览源…</option>
-                </select>
-                <button type="button" class="btn btn-sm" id="btn-refresh-sources" title="重新读取预览源列表">刷新列表</button>
+            <div class="source-toolbar">
+                <label class="field-label" for="source-datetime">选取时间</label>
+                <input class="dt-input" id="source-datetime" type="datetime-local" step="60" disabled>
+                <button type="button" class="btn btn-sm" id="btn-pick-datetime" disabled>选用该时间</button>
+                <button type="button" class="btn btn-sm" id="btn-refresh-sources" title="重新读取可用时间点与标签">刷新列表</button>
                 <button type="button" class="btn btn-sm" id="btn-rerun" disabled>重跑当前预览</button>
             </div>
+            <p id="dt-hint" class="preview-hint dt-hint" data-tone="muted" aria-live="polite">正在读取可用时间点…</p>
+            <div class="dt-suggestions" id="dt-suggestions" hidden></div>
+            <div class="source-meta">
+                <span id="source-total" class="source-total">共 — 个可用时间点</span>
+                <span id="source-current" class="source-current">当前选中：—</span>
+            </div>
+            <div class="tag-filter" id="tag-filter" role="group" aria-label="按标签过滤时间点"></div>
+            <div class="source-list-wrap" id="source-list-wrap">
+                <ul class="source-list" id="source-list" role="listbox" aria-label="可用分析时间点（最新在前）"></ul>
+                <p class="source-empty" id="source-list-empty" hidden>没有可选的时间点</p>
+            </div>
+            <p class="source-truncated" id="source-truncated" hidden></p>
             <p id="preview-hint" class="preview-hint" data-tone="busy" aria-live="polite">正在初始化…</p>
+        </section>
+
+        <section class="card" aria-label="时间点标签">
+            <div class="card-head">
+                <div class="card-heading">
+                    <h2>时间点标签</h2>
+                    <p class="card-sub">给分析结果打场景标签（如 晴朗天空 / 多云 / 薄雾），当作分类型测试样本；在上方点标签 chip 可按标签筛选时间点。</p>
+                </div>
+                <div class="badges">
+                    <span id="tag-current-dt" class="badge badge-mono">未选择时间点</span>
+                    <span id="tag-dirty" class="badge badge-tag-dirty" hidden>标签未保存</span>
+                </div>
+            </div>
+            <div class="tag-chips" id="tag-current-chips"></div>
+            <p class="tag-empty" id="tag-current-empty">请先在上方选择一个时间点。</p>
+            <div class="tag-add-row">
+                <label class="field-label" for="tag-input">添加标签</label>
+                <input class="tag-input" id="tag-input" type="text" list="tag-suggestions" maxlength="24"
+                       autocomplete="off" spellcheck="false" placeholder="输入标签后回车，如：晴朗天空" disabled>
+                <datalist id="tag-suggestions"></datalist>
+                <button type="button" class="btn btn-sm" id="btn-add-tag" disabled>添加</button>
+            </div>
+            <div class="tag-presets" id="tag-presets" role="group" aria-label="预设标签"></div>
+            <div class="tag-editor-foot">
+                <p class="tag-validation" id="tag-validation" role="status" aria-live="polite"></p>
+                <button type="button" class="btn btn-sm" id="btn-save-tags" disabled>保存标签</button>
+            </div>
         </section>
 
         <section class="card" aria-label="预览图像">
@@ -1056,9 +1290,12 @@
     var API_STATE = '/tools/api/color_thresholds';
     var API_RESET = '/tools/api/color_thresholds/reset';
     var API_SOURCES = '/tools/api/preview_sources';
+    var API_TAGS = '/tools/api/preview_tags';
     var API_PREVIEW = '/tools/api/threshold_preview';
 
     var DEBOUNCE_MS = 180;
+    var MAX_TAGS = 20;
+    var MAX_TAG_LENGTH = 24;
     var BOUND_FALLBACK = { H: [0, 179], S: [0, 255], V: [0, 255] };
     var CH_INDEX = { H: 0, S: 1, V: 2 };
     var BOUND_CN = { lower: '下限', upper: '上限' };
@@ -1074,8 +1311,19 @@
     var touched = false;               // 用户是否已手动改过表单
     var baselineApplied = false;       // 表单是否已经用「真实基准」填充过（防止用空模型覆盖/保存）
     var saving = false;
-    var currentSource = '';
-    var sourceKind = '';
+    var currentSource = '';            // 当前选中的 analysis:<ts>
+    var currentTimestamp = null;       // 当前选中时间点的 epoch 秒
+    var sources = [];                  // 规范化后的可用分析时间点（按时间倒序）
+    var sourcesTotal = 0;              // 服务端给出的真实可用时间点总数
+    var sourcesTruncated = false;      // 服务端是否只返回了最新 N 个
+    var tagCounts = [];                // [{tag, count}]
+    var tagPresets = [];               // [{tag}] 预设标签（纯字符串数组）
+    var activeTagFilter = '';          // '' = 全部；否则按该 tag 过滤
+    var savedTags = [];                // 当前时间点已保存的 tag（编辑基准）
+    var currentTags = [];              // 当前时间点编辑中的 tag
+    var tagsSaving = false;
+    var sourcesLoading = false;
+    var sourcesSeq = 0;                // 源列表请求序号，防止旧响应覆盖新列表
     var firstPreview = true;           // 首次预览传 ranges=null，让服务端使用已保存配置
     var previewRequested = false;      // 是否已用表单值请求过预览
     var seq = 0;                       // 预览请求序号，防止旧响应覆盖新结果
@@ -1556,99 +1804,590 @@
         }
     }
 
-    /* ---------------- 预览源 ---------------- */
-    function selectedKind() {
-        var select = $('source-select');
-        var option = select.options[select.selectedIndex];
-        return option ? (option.dataset.kind || '') : '';
+    /* ---------------- 预览源：分析时间点 / 标签 ---------------- */
+    function findSource(sourceId) {
+        if (!sourceId) return null;
+        return sources.filter(function (item) { return item.id === sourceId; })[0] || null;
     }
 
-    function selectedLabel() {
-        var select = $('source-select');
-        var option = select.options[select.selectedIndex];
-        return (option && option.value) ? option.textContent : '';
+    function findSourceByTimestamp(timestamp) {
+        return sources.filter(function (item) { return item.timestamp === timestamp; })[0] || null;
     }
 
-    function renderSources(sources, defaultId) {
-        var select = $('source-select');
-        var groups = [
-            { kind: 'analysis', label: '分析结果', items: sources.filter(function (item) { return item.kind !== 'test'; }) },
-            { kind: 'test', label: '测试图片', items: sources.filter(function (item) { return item.kind === 'test'; }) }
-        ];
-        var fragment = document.createDocumentFragment();
-        var firstId = '';
+    function currentSourceLabel() {
+        var source = findSource(currentSource);
+        return source ? source.label : '';
+    }
 
-        groups.forEach(function (group) {
-            if (!group.items.length) return;
-            var optgroup = document.createElement('optgroup');
-            optgroup.label = group.label;
-            group.items.forEach(function (item) {
-                var id = (item.id === null || item.id === undefined) ? '' : String(item.id);
-                if (!id) return;
-                if (!firstId) firstId = id;
-                var option = document.createElement('option');
-                option.value = id;
-                option.textContent = (item.label === null || item.label === undefined) ? id : String(item.label);
-                option.dataset.kind = group.kind;
-                optgroup.appendChild(option);
-            });
-            if (optgroup.children.length) fragment.appendChild(optgroup);
+    function pad2(value) {
+        return value < 10 ? '0' + value : String(value);
+    }
+
+    // ISO8601 -> <input type="datetime-local"> 需要的浏览器本地时间字符串
+    function toDatetimeLocalValue(iso) {
+        var date = new Date(iso);
+        if (isNaN(date.getTime())) return '';
+        return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
+            'T' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+    }
+
+    function formatLocalLabel(timestamp) {
+        var date = new Date(timestamp * 1000);
+        return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
+            ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+    }
+
+    function normalizeSource(raw) {
+        if (!raw || raw.id === null || raw.id === undefined) return null;
+        var id = String(raw.id);
+        var timestamp = Number(raw.timestamp);
+        if (!isFinite(timestamp)) {
+            var matched = /^analysis:(\d+)$/.exec(id);
+            if (!matched) return null;
+            timestamp = Number(matched[1]);
+        }
+        var datetime = raw.datetime ? String(raw.datetime) : new Date(timestamp * 1000).toISOString();
+        var label = raw.label ? String(raw.label) : formatLocalLabel(timestamp);
+        var tags = Array.isArray(raw.tags) ? raw.tags.map(function (tag) { return String(tag); }) : [];
+        return { id: id, timestamp: timestamp, datetime: datetime, label: label, tags: tags };
+    }
+
+    function normalizeTagCounts(raw) {
+        if (!Array.isArray(raw)) return [];
+        return raw.filter(function (item) {
+            return item && item.tag !== undefined && item.tag !== null;
+        }).map(function (item) {
+            return { tag: String(item.tag), count: Number(item.count) || 0 };
         });
-
-        if (!firstId) {
-            var empty = document.createElement('option');
-            empty.value = '';
-            empty.textContent = '没有可用的预览源';
-            fragment.appendChild(empty);
-        }
-        select.replaceChildren(fragment);
-
-        var wanted = (defaultId !== null && defaultId !== undefined && String(defaultId)) ? String(defaultId) : firstId;
-        if (wanted) {
-            Array.from(select.options).forEach(function (option) {
-                if (option.value === wanted) option.selected = true;
-            });
-        }
-
-        currentSource = select.value || '';
-        sourceKind = selectedKind();
-        $('btn-rerun').disabled = !currentSource;
-        if (!currentSource) setHint('没有可用的预览源，无法生成预览', 'warn');
     }
 
-    async function loadSources() {
-        var select = $('source-select');
-        select.disabled = true;
+    function filteredSources() {
+        if (!activeTagFilter) return sources;
+        return sources.filter(function (item) { return item.tags.indexOf(activeTagFilter) !== -1; });
+    }
+
+    function syncDatetimeInput() {
+        var source = findSource(currentSource);
+        $('source-datetime').value = source ? toDatetimeLocalValue(source.datetime) : '';
+    }
+
+    function setDtHint(text, tone) {
+        var el = $('dt-hint');
+        el.textContent = text;
+        el.dataset.tone = tone || 'muted';
+    }
+
+    function clearSuggestions() {
+        var wrap = $('dt-suggestions');
+        wrap.hidden = true;
+        wrap.replaceChildren();
+    }
+
+    function renderSuggestions(list) {
+        var wrap = $('dt-suggestions');
+        var fragment = document.createDocumentFragment();
+        list.forEach(function (source) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'dt-suggestion';
+            button.dataset.sourceId = source.id;
+            button.textContent = source.label;
+            fragment.appendChild(button);
+        });
+        wrap.replaceChildren(fragment);
+        wrap.hidden = list.length === 0;
+    }
+
+    function nearestSources(timestamp, limit) {
+        return sources.slice().sort(function (a, b) {
+            return Math.abs(a.timestamp - timestamp) - Math.abs(b.timestamp - timestamp);
+        }).slice(0, limit);
+    }
+
+    function renderSourceMeta() {
+        var filteredCount = filteredSources().length;
+        $('source-total').textContent = '共 ' + sourcesTotal + ' 个可用时间点' +
+            (activeTagFilter ? ' · 当前显示 ' + filteredCount + ' 个' : '');
+        var source = findSource(currentSource);
+        $('source-current').textContent = source ? ('当前选中：' + source.label) : '当前选中：—';
+        var truncated = $('source-truncated');
+        truncated.hidden = !sourcesTruncated;
+        if (sourcesTruncated) {
+            truncated.textContent = '共 ' + sourcesTotal + ' 个可用时间点，仅展示最新 ' + sources.length + ' 个';
+        }
+    }
+
+    function renderTagFilter() {
+        var wrap = $('tag-filter');
+        var fragment = document.createDocumentFragment();
+        function buildChip(label, count, active, filterValue) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'tag-filter-chip' + (active ? ' is-active' : '');
+            button.dataset.filterTag = filterValue;
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            button.textContent = label;
+            if (count !== null) {
+                var countEl = document.createElement('span');
+                countEl.className = 'tag-filter-count';
+                countEl.textContent = String(count);
+                button.appendChild(countEl);
+            }
+            return button;
+        }
+        fragment.appendChild(buildChip('全部', null, !activeTagFilter, ''));
+        tagCounts.forEach(function (item) {
+            fragment.appendChild(buildChip(item.tag, item.count, activeTagFilter === item.tag, item.tag));
+        });
+        wrap.replaceChildren(fragment);
+    }
+
+    function renderSourceList() {
+        var list = $('source-list');
+        var items = filteredSources();
+        var fragment = document.createDocumentFragment();
+        items.forEach(function (source) {
+            var selected = source.id === currentSource;
+            var li = document.createElement('li');
+            li.className = 'source-item' + (selected ? ' is-selected' : '');
+            li.setAttribute('role', 'option');
+            li.setAttribute('tabindex', '0');
+            li.setAttribute('aria-selected', selected ? 'true' : 'false');
+            if (selected) li.setAttribute('aria-current', 'true');
+            li.dataset.sourceId = source.id;
+
+            var time = document.createElement('span');
+            time.className = 'source-item-time';
+            time.textContent = source.label;
+            li.appendChild(time);
+
+            var tagsWrap = document.createElement('span');
+            tagsWrap.className = 'source-item-tags';
+            if (source.tags.length) {
+                source.tags.forEach(function (tag) {
+                    var chip = document.createElement('span');
+                    chip.className = 'source-tag-chip';
+                    chip.textContent = tag;
+                    tagsWrap.appendChild(chip);
+                });
+            } else {
+                var none = document.createElement('span');
+                none.className = 'source-tag-none';
+                none.textContent = '未打标签';
+                tagsWrap.appendChild(none);
+            }
+            li.appendChild(tagsWrap);
+            fragment.appendChild(li);
+        });
+        list.replaceChildren(fragment);
+
+        var empty = $('source-list-empty');
+        empty.hidden = items.length > 0;
+        if (!items.length) {
+            empty.textContent = activeTagFilter ? ('没有该 tag 的时间点：' + activeTagFilter) : '没有可选的时间点';
+        }
+    }
+
+    function syncSourceControls() {
+        var hasSources = sources.length > 0;
+        var hasCurrent = Boolean(findSource(currentSource));
+        var locked = sourcesLoading;
+        $('source-datetime').disabled = !hasSources || locked;
+        $('btn-pick-datetime').disabled = !hasSources || locked;
+        $('btn-refresh-sources').disabled = locked || tagsSaving;
+        $('btn-rerun').disabled = !hasCurrent || locked;
+        $('tag-input').disabled = !hasCurrent || tagsSaving;
+        $('btn-add-tag').disabled = !hasCurrent || tagsSaving;
+        var errors = tagValidationErrors();
+        $('btn-save-tags').disabled = !hasCurrent || tagsSaving || !isTagDirty() || errors.length > 0;
+        $('btn-save-tags').textContent = tagsSaving ? '保存中…' : '保存标签';
+        $('source-list-wrap').setAttribute('aria-busy', locked ? 'true' : 'false');
+    }
+
+    function renderSourceUi() {
+        renderSourceMeta();
+        renderTagFilter();
+        renderSourceList();
+        syncSourceControls();
+    }
+
+    function applySourcesPayload(data, options) {
+        var opts = options || {};
+        var rawSources = (data && Array.isArray(data.sources)) ? data.sources : [];
+        sources = rawSources.map(normalizeSource).filter(Boolean).sort(function (a, b) {
+            return b.timestamp - a.timestamp;
+        });
+        sourcesTotal = (data && isNum(Number(data.total))) ? Number(data.total) : sources.length;
+        sourcesTruncated = Boolean(data && data.truncated);
+        tagCounts = normalizeTagCounts(data && data.tags);
+        if (data && Array.isArray(data.presets)) tagPresets = data.presets.map(String);
+        if (activeTagFilter && !tagCounts.some(function (item) { return item.tag === activeTagFilter; })) {
+            activeTagFilter = '';
+        }
+
+        var kept = opts.preserveSelection ? findSource(currentSource) : null;
+        var preferred = (data && data.default !== null && data.default !== undefined)
+            ? findSource(String(data.default)) : null;
+        var chosen = kept || preferred || sources[0] || null;
+
+        if (chosen) {
+            currentSource = chosen.id;
+            currentTimestamp = chosen.timestamp;
+            savedTags = chosen.tags.slice();
+            currentTags = chosen.tags.slice();
+        } else {
+            currentSource = '';
+            currentTimestamp = null;
+            savedTags = [];
+            currentTags = [];
+        }
+        syncDatetimeInput();
+        clearSuggestions();
+        renderSourceUi();
+        renderTagEditor();
+        if (sources.length) {
+            setDtHint('已载入 ' + sources.length + ' 个可用时间点；可点选下方列表，或按日期时间检索', 'muted');
+        }
+    }
+
+    async function loadSources(options) {
+        var opts = options || {};
+        var requestSeq = ++sourcesSeq;
+        sourcesLoading = true;
+        syncSourceControls();
         try {
             var data = await api(API_SOURCES);
-            var sources = (data && Array.isArray(data.sources)) ? data.sources : [];
-            renderSources(sources, data ? data.default : null);
-            select.disabled = false;
+            if (requestSeq !== sourcesSeq) return false;
+            applySourcesPayload(data, opts);
             clearAlert('sources');
             return true;
         } catch (error) {
-            var option = document.createElement('option');
-            option.value = '';
-            option.textContent = '预览源读取失败';
-            select.replaceChildren(option);
-            select.disabled = true;
+            if (requestSeq !== sourcesSeq) return false;
+            sources = [];
+            sourcesTotal = 0;
+            sourcesTruncated = false;
+            tagCounts = [];
             currentSource = '';
-            sourceKind = '';
-            $('btn-rerun').disabled = true;
+            currentTimestamp = null;
+            savedTags = [];
+            currentTags = [];
+            activeTagFilter = '';
+            $('source-datetime').value = '';
+            clearSuggestions();
+            renderSourceUi();
+            renderTagEditor();
             setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
+            setDtHint('可用时间点读取失败', 'error');
             reportError('无法读取预览源列表', error, 'sources');
             return false;
+        } finally {
+            if (requestSeq === sourcesSeq) {
+                sourcesLoading = false;
+                syncSourceControls();
+            }
         }
     }
 
     async function refreshSources() {
-        var button = $('btn-refresh-sources');
-        button.disabled = true;
+        if (isTagDirty() && !window.confirm('当前时间点有未保存的标签修改，刷新列表将放弃这些修改。确定继续吗？')) return;
         try {
-            var ok = await loadSources();
-            if (ok && currentSource) requestPreview();
+            var ok = await loadSources({ preserveSelection: true });
+            if (ok && currentSource) {
+                firstPreview = false;
+                requestPreview();
+            }
         } finally {
-            button.disabled = false;
+            syncSourceControls();
+        }
+    }
+
+    function selectSource(sourceId, options) {
+        var opts = options || {};
+        var source = findSource(String(sourceId));
+        if (!source) return false;
+        if (source.id === currentSource) {
+            syncDatetimeInput();
+            return true;
+        }
+        if (isTagDirty() && !opts.skipConfirm) {
+            if (!window.confirm('当前时间点有未保存的标签修改，切换后将放弃这些修改。确定继续吗？')) {
+                renderSourceList();
+                return false;
+            }
+        }
+        currentSource = source.id;
+        currentTimestamp = source.timestamp;
+        savedTags = source.tags.slice();
+        currentTags = source.tags.slice();
+        // 若当前正按某个 tag 过滤、而选中的时间点不匹配该 tag，自动回到「全部」：
+        // 用户通过日期时间检索或「最近可用」建议明确选中了某个时间点时，该行必须在列表里可见。
+        if (activeTagFilter && !source.tags.includes(activeTagFilter)) {
+            activeTagFilter = '';
+            renderTagFilter();
+        }
+        syncDatetimeInput();
+        clearSuggestions();
+        renderSourceUi();
+        renderTagEditor();
+        if (opts.preview !== false) {
+            firstPreview = false;
+            requestPreview();
+        }
+        return true;
+    }
+
+    function setTagFilter(tag) {
+        activeTagFilter = tag || '';
+        renderTagFilter();
+        renderSourceList();
+        renderSourceMeta();
+        if (!activeTagFilter) return;
+        var matches = filteredSources();
+        if (!matches.length) return;
+        var currentVisible = matches.some(function (item) { return item.id === currentSource; });
+        if (!currentVisible) selectSource(matches[0].id, {});
+    }
+
+    function pickDatetime() {
+        var input = $('source-datetime');
+        var raw = input.value ? input.value.trim() : '';
+        if (!raw) {
+            clearSuggestions();
+            setDtHint('请选择日期时间（按浏览器本地时区）', 'warn');
+            return false;
+        }
+        var date = new Date(raw);
+        if (isNaN(date.getTime())) {
+            clearSuggestions();
+            setDtHint('日期时间格式不合法，请重新选择', 'warn');
+            return false;
+        }
+        if (!sources.length) {
+            clearSuggestions();
+            setDtHint('没有可用的分析时间点', 'error');
+            return false;
+        }
+        var timestamp = Math.floor(date.getTime() / 1000);
+        var exact = findSourceByTimestamp(timestamp);
+        if (exact) {
+            clearSuggestions();
+            setDtHint('已选用该时间点的分析结果', 'ok');
+            selectSource(exact.id, {});
+            return true;
+        }
+        setDtHint('该时间没有分析结果，最近可用：', 'warn');
+        renderSuggestions(nearestSources(timestamp, 3));
+        return false;
+    }
+
+    /* ---------------- 时间点标签编辑 ---------------- */
+    function tagsKey(list) {
+        return list.join('\u0000');
+    }
+
+    function isTagDirty() {
+        return Boolean(findSource(currentSource)) && tagsKey(currentTags) !== tagsKey(savedTags);
+    }
+
+    function tagValidationErrors() {
+        var errors = [];
+        if (!findSource(currentSource)) return errors;
+        if (currentTags.length > MAX_TAGS) {
+            errors.push('最多只能打 ' + MAX_TAGS + ' 个标签（当前 ' + currentTags.length + ' 个）');
+        }
+        currentTags.forEach(function (tag) {
+            if (tag.length < 1 || tag.length > MAX_TAG_LENGTH) {
+                errors.push('标签「' + tag + '」长度需为 1–' + MAX_TAG_LENGTH + ' 个字符');
+            }
+        });
+        return errors;
+    }
+
+    function setTagValidation(errors) {
+        var el = $('tag-validation');
+        if (!errors || !errors.length) {
+            el.hidden = true;
+            el.textContent = '';
+        } else {
+            el.hidden = false;
+            el.textContent = errors.join('；');
+        }
+    }
+
+    function updateTagDirtyBadge() {
+        $('tag-dirty').hidden = !isTagDirty();
+    }
+
+    function renderTagPresets() {
+        var wrap = $('tag-presets');
+        var hasCurrent = Boolean(findSource(currentSource));
+        if (!tagPresets.length) {
+            wrap.hidden = true;
+            wrap.replaceChildren();
+            return;
+        }
+        wrap.hidden = false;
+        var fragment = document.createDocumentFragment();
+        tagPresets.forEach(function (tag) {
+            var exists = currentTags.indexOf(tag) !== -1;
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'tag-preset';
+            button.dataset.addTag = tag;
+            button.disabled = !hasCurrent || exists || tagsSaving;
+            button.textContent = tag;
+            button.title = exists ? '该标签已存在' : ('添加预设标签：' + tag);
+            fragment.appendChild(button);
+        });
+        wrap.replaceChildren(fragment);
+    }
+
+    function renderTagDatalist() {
+        var datalist = $('tag-suggestions');
+        var seen = {};
+        var fragment = document.createDocumentFragment();
+        tagPresets.concat(tagCounts.map(function (item) { return item.tag; })).forEach(function (tag) {
+            if (!tag || seen[tag]) return;
+            seen[tag] = true;
+            var option = document.createElement('option');
+            option.value = tag;
+            fragment.appendChild(option);
+        });
+        datalist.replaceChildren(fragment);
+    }
+
+    function renderTagEditor() {
+        var source = findSource(currentSource);
+        var chips = $('tag-current-chips');
+        var empty = $('tag-current-empty');
+        var dtBadge = $('tag-current-dt');
+
+        if (!source) {
+            chips.replaceChildren();
+            empty.hidden = false;
+            empty.textContent = sources.length
+                ? '请先在上方选择一个时间点。'
+                : '没有可用的时间点，无法编辑标签。';
+            dtBadge.textContent = '未选择时间点';
+        } else {
+            var fragment = document.createDocumentFragment();
+            if (currentTags.length) {
+                empty.hidden = true;
+                currentTags.forEach(function (tag) {
+                    var chip = document.createElement('span');
+                    chip.className = 'tag-chip';
+                    var text = document.createElement('span');
+                    text.textContent = tag;
+                    chip.appendChild(text);
+                    var remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'tag-chip-remove';
+                    remove.dataset.removeTag = tag;
+                    remove.setAttribute('aria-label', '移除标签 ' + tag);
+                    remove.textContent = '×';
+                    chip.appendChild(remove);
+                    fragment.appendChild(chip);
+                });
+            } else {
+                empty.hidden = false;
+                empty.textContent = '该时间点还没有标签。';
+            }
+            chips.replaceChildren(fragment);
+            dtBadge.textContent = source.label;
+        }
+
+        renderTagPresets();
+        renderTagDatalist();
+        setTagValidation(tagValidationErrors());
+        updateTagDirtyBadge();
+        syncSourceControls();
+    }
+
+    function addTag(rawValue) {
+        if (!findSource(currentSource)) {
+            showToast('请先选择一个时间点', 'warn');
+            return false;
+        }
+        var tag = String(rawValue === null || rawValue === undefined ? '' : rawValue).trim();
+        if (!tag) {
+            setTagValidation(['标签不能为空（去除首尾空格后）']);
+            return false;
+        }
+        if (tag.length > MAX_TAG_LENGTH) {
+            setTagValidation(['标签长度需为 1–' + MAX_TAG_LENGTH + ' 个字符']);
+            return false;
+        }
+        if (currentTags.indexOf(tag) !== -1) {
+            setTagValidation(['标签「' + tag + '」已存在，已自动忽略']);
+            return false;
+        }
+        if (currentTags.length >= MAX_TAGS) {
+            setTagValidation(['最多只能打 ' + MAX_TAGS + ' 个标签']);
+            return false;
+        }
+        currentTags.push(tag);
+        renderTagEditor();
+        return true;
+    }
+
+    function removeTag(tag) {
+        var index = currentTags.indexOf(tag);
+        if (index === -1) return false;
+        currentTags.splice(index, 1);
+        renderTagEditor();
+        return true;
+    }
+
+    function addTagFromInput() {
+        var input = $('tag-input');
+        if (!findSource(currentSource)) {
+            showToast('请先选择一个时间点', 'warn');
+            return;
+        }
+        if (addTag(input.value)) {
+            input.value = '';
+            if (typeof input.focus === 'function') input.focus();
+        }
+    }
+
+    async function saveTags() {
+        var source = findSource(currentSource);
+        if (!source || tagsSaving) return false;
+        var errors = tagValidationErrors();
+        if (errors.length) {
+            setTagValidation(errors);
+            showToast('标签校验未通过，请先修正', 'error');
+            return false;
+        }
+        if (!isTagDirty()) {
+            showToast('标签没有修改', 'info');
+            return false;
+        }
+        tagsSaving = true;
+        syncSourceControls();
+        try {
+            var data = await api(API_TAGS, {
+                method: 'POST',
+                body: JSON.stringify({ timestamp: source.timestamp, tags: currentTags.slice() })
+            });
+            var responseTags = (data && Array.isArray(data.tags))
+                ? data.tags.map(function (tag) { return String(tag); })
+                : currentTags.slice();
+            source.tags = responseTags.slice();
+            savedTags = responseTags.slice();
+            currentTags = responseTags.slice();
+            clearAlert('tags');
+            updateTagDirtyBadge();
+            showToast('标签已保存', 'ok');
+            // 刷新源列表与 tag 计数，保持当前选中源与过滤状态
+            await loadSources({ preserveSelection: true });
+            return true;
+        } catch (error) {
+            reportError('保存标签失败', error, 'tags');
+            return false;
+        } finally {
+            tagsSaving = false;
+            syncSourceControls();
         }
     }
 
@@ -1759,7 +2498,7 @@
             latency.title = '服务端处理耗时';
         }
 
-        var sourceLabel = selectedLabel();
+        var sourceLabel = currentSourceLabel();
         setHint('预览已更新' + (sourceLabel ? ' · ' + sourceLabel : ''), 'ok');
         clearAlert('preview');
     }
@@ -1787,7 +2526,7 @@
 
     async function requestPreview() {
         if (!currentSource) {
-            setHint('没有可用的预览源，无法生成预览', 'warn');
+            setHint('没有可用的分析时间点，无法生成预览', 'warn');
             return;
         }
 
@@ -1808,10 +2547,9 @@
         if (!useSavedConfig) previewRequested = true;
         firstPreview = false;
 
-        var isTestSource = sourceKind === 'test';
-        setVeilText(isTestSource ? '首次加载会进行高清化，请稍候…' : '正在生成预览…');
+        setVeilText('正在生成预览…');
         setPreviewLoading(true);
-        setHint(isTestSource ? '测试图片首次加载会进行高清化（Real-ESRGAN），请稍候…' : '正在生成预览…', 'busy');
+        setHint('正在生成预览…', 'busy');
         $('btn-rerun').disabled = true;
 
         var payload = {
@@ -1835,7 +2573,7 @@
             if (requestSeq === seq) {
                 setPreviewLoading(false);
                 inflight = null;
-                $('btn-rerun').disabled = !currentSource;
+                syncSourceControls();
             }
         }
     }
@@ -2005,12 +2743,56 @@
             button.addEventListener('click', function () { loadDefaults(button.dataset.class); });
         });
 
-        $('source-select').addEventListener('change', function () {
-            currentSource = $('source-select').value;
-            sourceKind = selectedKind();
-            firstPreview = false;   // 用户已明确选择预览源，按当前表单值渲染
-            requestPreview();
+        $('btn-pick-datetime').addEventListener('click', function () { pickDatetime(); });
+        $('source-datetime').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                pickDatetime();
+            }
         });
+        $('dt-suggestions').addEventListener('click', function (event) {
+            var button = event.target.closest('.dt-suggestion');
+            if (!button) return;
+            if (selectSource(button.dataset.sourceId, {})) setDtHint('已选用最近可用的时间点', 'ok');
+        });
+
+        $('source-list').addEventListener('click', function (event) {
+            var item = event.target.closest('.source-item');
+            if (!item) return;
+            if (selectSource(item.dataset.sourceId, {})) setDtHint('已选用该时间点', 'ok');
+        });
+        $('source-list').addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            var item = event.target.closest('.source-item');
+            if (!item) return;
+            event.preventDefault();
+            if (selectSource(item.dataset.sourceId, {})) setDtHint('已选用该时间点', 'ok');
+        });
+
+        $('tag-filter').addEventListener('click', function (event) {
+            var chip = event.target.closest('.tag-filter-chip');
+            if (!chip) return;
+            setTagFilter(chip.dataset.filterTag || '');
+        });
+        $('tag-current-chips').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-remove-tag]');
+            if (!button) return;
+            removeTag(button.dataset.removeTag);
+        });
+        $('tag-presets').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-add-tag]');
+            if (!button) return;
+            addTag(button.dataset.addTag);
+        });
+        $('btn-add-tag').addEventListener('click', addTagFromInput);
+        $('tag-input').addEventListener('keydown', function (event) {
+            // 标签输入框内 Enter 只添加 tag，不触发阈值保存（Ctrl/Cmd+S 仍保存阈值）
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addTagFromInput();
+            }
+        });
+        $('btn-save-tags').addEventListener('click', function () { void saveTags(); });
 
         document.addEventListener('keydown', function (event) {
             var modifier = event.ctrlKey || event.metaKey;
@@ -2032,7 +2814,7 @@
 
     /* ---------------- 启动 ---------------- */
     async function loadInitial() {
-        setHint('正在读取阈值配置与预览源…', 'busy');
+        setHint('正在读取阈值配置与可用时间点…', 'busy');
         var results = await Promise.all([loadState(), loadSources()]);
         var sourcesOk = results[1];
         if (sourcesOk && currentSource) {
@@ -2040,7 +2822,7 @@
         } else if (!sourcesOk) {
             setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
         } else {
-            setHint('没有可用的预览源，无法生成预览', 'warn');
+            setHint('没有可用的分析时间点，无法生成预览', 'warn');
         }
     }
 

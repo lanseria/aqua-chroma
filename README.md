@@ -23,6 +23,7 @@
     - 估算 **海面能见度**（公里）：在无云水面上以暗通道亮度、局部 RMS 对比度、边缘纹理密度三项大气浑浊度代理量反演，并按 Koschmieder 定律（V = 3.912/β）折算为公里；无云水面占比不足时按比例混入含云顶的全场景测量，云越厚能见度自然越低，数值随云量连续过渡（无硬截断记 0），输出"良好/中等/轻度霾雾/浓雾"等级。
 - **HSV 参数在线调优（批量对比）**: 内置批量调参工具（`/tools/hsv_tuner`），可视化调整云/蓝水的 HSV 阈值并对测试图集批量重处理，用于快速对比不同参数下的分类效果（只作用于本次调试，不影响线上配置）。
 - **颜色阈值实时调优（保存即生效）**: 内置网页控制台（`/tools/color_thresholds`）——拖动滑块实时预览分类结果与指标变化，保存后阈值直接写入 PostgreSQL（`app_settings` 表），下一次定时分析立即采用新阈值；无需重启服务，也不再需要把阈值写进 `.env` 或 `config.py`。
+- **预览取样与 tag 归类**: 调优页的预览源可自选**任意一次历史分析结果的时间点**（不再依赖测试图片），并给时间点打 tag（内置 `晴朗天空` / `少云` / `多云` / `阴天` / `薄雾` / `浓雾`，也支持自定义），按 tag 过滤即可用真实场景样本对比不同阈值的分类效果；tag 持久化在 `preview_tags` 表。
 - **调试友好**: 每次分析都会将处理过程中的中间图像（原始图、色彩均衡图、海洋蒙版图、HSV 分类图等）按阶段编号保存到本地，便于调试和验证算法效果。
 - **容器化部署**: 提供 `Dockerfile` 和 `docker-compose.yml`，使用 `uv` 作为包管理器，实现一键构建和部署。
 - **灵活配置**: 数据源、目标区域、调度与重试参数等基础设施配置由环境变量 / `app/config.py` 管理；**HSV 颜色阈值是数据库中的运行时配置**（`app_settings` 表，页面 `/tools/color_thresholds` 编辑，保存即生效），`config.py` 中的数值仅作首次启动的兜底默认值。
@@ -110,7 +111,7 @@ docker compose up --build -d
 | `/` | 健康检查（返回 JSON） |
 | `/api/results` | 查询数据库中全部分析结果 |
 | `/tools/hsv_tuner` | HSV 参数在线批量调优工具（调试用，不影响线上阈值） |
-| `/tools/color_thresholds` | 颜色阈值实时调优控制台（保存即生效） |
+| `/tools/color_thresholds` | 颜色阈值实时调优控制台（自选分析时间点、tag 分类、保存即生效） |
 | `/data/output/{timestamp}/` | 浏览某次分析的中间处理图像 |
 
 ### 5. 查看日志和数据
@@ -179,8 +180,10 @@ uvicorn app.main:app --reload
 | GET | `/tools/api/color_thresholds` | 读取当前生效的 HSV 阈值、来源（数据库/默认值）与更新时间 |
 | POST | `/tools/api/color_thresholds` | 校验并保存 HSV 阈值到数据库（立即生效，无需重启） |
 | POST | `/tools/api/color_thresholds/reset` | 恢复内置默认阈值（删除数据库记录） |
-| GET | `/tools/api/preview_sources` | 列出可用于实时预览的图像源（最新分析结果、测试图） |
-| POST | `/tools/api/threshold_preview` | 用给定阈值对某个图像源做实时分类预览（返回图像与指标） |
+| GET | `/tools/api/preview_sources` | 列出全部可预览的分析结果时间点（含 datetime、tag、总数/截断标记）与 tag 统计、预设 |
+| POST | `/tools/api/threshold_preview` | 用给定阈值对某个分析结果时间点做实时分类预览（返回图像与指标） |
+| GET | `/tools/api/preview_tags` | 读取所有 tag 及其样本计数、内置预设 tag |
+| POST | `/tools/api/preview_tags` | 替换式保存某个分析结果时间点的 tag 列表（如把该时刻标记为「多云」） |
 | GET | `/tools/api/test_images` | 列出 `test_images/` 下的测试图 |
 | POST | `/tools/api/reprocess_all_hsv` | 用指定 HSV 参数批量重处理所有测试图 |
 
@@ -207,6 +210,14 @@ uv run python scripts/migrate_add_app_settings.py
 
 迁移后表内为空即表示"使用内置默认阈值"；在 `/tools/color_thresholds` 页面保存后，该表出现 `hsv_color_ranges` 记录，并成为唯一生效来源。阈值不再通过环境变量配置。
 
+预览源的 tag 归类使用新表 `preview_tags`（`timestamp` + `tag`，同一时间点可多个 tag）。同样有幂等迁移脚本：
+
+```bash
+uv run python scripts/migrate_add_preview_tags.py
+```
+
+tag 为空即表示该时间点未归类；调优页可按 tag 过滤时间点。测试图片（`test_images/`）只服务于旧的 `/tools/hsv_tuner` 批量调参页，不再出现在阈值实时调优页的预览源中。
+
 ---
 
 ## 📂 项目结构
@@ -220,18 +231,18 @@ uv run python scripts/migrate_add_app_settings.py
 │   ├── pipeline.py       # 图像预处理流水线（缩放→CLAHE→海洋蒙版→颜色分析）
 │   ├── processor.py      # 日夜判断、HSV 颜色分类（阈值取自运行时设置）、暗通道去雾
 │   ├── settings_store.py # 运行时设置存储（HSV 阈值：DB 持久化 + 缓存 + 校验，保存即生效）
-│   ├── threshold_preview.py # 阈值实时预览（复用生产分类逻辑，预处理结果按源缓存）
+│   ├── threshold_preview.py # 阈值实时预览（仅分析结果源；预处理按源缓存；含 tag 过滤数据）
 │   ├── geo_utils.py      # GeoJSON 转像素蒙版（墨卡托投影）、地图标注
 │   ├── database.py       # SQLAlchemy 数据库连接（同步）
-│   ├── models.py         # ORM 模型（analysis_results 分析结果、app_settings 运行时设置）
-│   ├── crud.py           # 数据读写（结果 upsert；运行时设置 get/upsert/delete）
+│   ├── models.py         # ORM 模型（analysis_results 分析结果、app_settings 运行时设置、preview_tags 预览源 tag）
+│   ├── crud.py           # 数据读写（结果 upsert；运行时设置 get/upsert/delete；tag 读写）
 │   ├── schemas.py        # Pydantic 请求/响应模型
 │   └── tools.py          # 在线调优工具与阈值 API（挂载在 /tools 路由）
 ├── geojson/              # GeoJSON 文件（海洋蒙版用）
 ├── data/                 # 运行时数据目录
 │   └── output/           # 每次分析的中间图像（按时间戳分目录）
 ├── templates/            # Jinja2 模板（HSV 批量调优、颜色阈值实时调优页面）
-├── test_images/          # HSV 调优用的测试图片
+├── test_images/          # 批量调参工具（/tools/hsv_tuner）用的测试图片
 ├── test_results/         # 调优工具输出结果
 ├── scripts/              # 数据迁移等辅助脚本
 ├── .env                  # 环境变量文件（本地开发）

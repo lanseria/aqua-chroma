@@ -188,6 +188,19 @@ ESRGAN_TORCH_THREADS = int(os.getenv("ESRGAN_TORCH_THREADS", "0")) or torch.get_
 # --- 定义调试图片的基准输出目录 ---
 OUTPUT_BASE_DIR = "data/output"
 
+# --- 颜色阈值实时预览：预览源与 tag 配置 ---
+# 预览源只取 data/output/<timestamp>/ 下的真实分析结果（03_ocean_only.png），
+# 允许给它打一或多个 tag（如 晴朗天空/多云/薄雾），把真实分析结果当作"分类型测试样本"。
+# 下面只是页面上的录入候选建议，实际允许任意不超过长度上限的 tag；
+# 用户打的 tag 持久化在数据库 preview_tags 表，不是写死的配置。
+PREVIEW_TAG_PRESETS = ["晴朗天空", "少云", "多云", "阴天", "薄雾", "浓雾"]
+# 单个 tag 的最大长度（字符数）
+PREVIEW_TAG_MAX_LENGTH = 24
+# 单个时间点最多可打的 tag 数量
+PREVIEW_TAG_MAX_COUNT = 20
+# 预览源接口单次最多返回的时间点数量（按时间倒序；超出时接口返回 truncated=true）
+PREVIEW_SOURCE_MAX_RETURN = 500
+
 # --- 调度器配置 ---
 # 是否在应用启动时跳过第一次立即执行的分析任务
 # 在 .env 文件中设置 SKIP_INITIAL_TASK=true 来启用

@@ -1,28 +1,29 @@
 # app/threshold_preview.py
 """
-HSV 阈值实时预览。
+HSV 阈值实时预览（仅分析结果源）。
 
-复用生产链路的预处理结果与 processor 的判定/着色/指标逻辑，只对「已准备好的
+复用生产链路的分析产物与 processor 的判定/着色/指标逻辑，只对「已准备好的
 单张图像」做 HSV 分类与渲染，不写任何文件，供 /tools/color_thresholds 页面
 拖动阈值时实时查看效果。
 
 图像源
 ------
-- analysis:<ts>：取 data/output/<ts>/03_ocean_only.png（生产链路已完成超分 + CLAHE +
-  海洋蒙版），海洋蒙版按该尺寸用 geo_utils.create_ocean_mask 重新生成（确定性结果，
-  与生产完全一致）；
-- test:<filename>：test_images/ 下的样本，首次预览时跑一次
-  super_resolution.enhance + pipeline._auto_balance_color + geo_utils.apply_mask，
-  之后走内存缓存。测试图是裁剪样本，用全图海洋蒙版（与 scripts/verify_visibility.py
-  同口径），不对应真实地理范围。
+仅支持 analysis:<timestamp>：取 data/output/<ts>/03_ocean_only.png
+（生产链路已完成超分 + CLAHE + 海洋蒙版），海洋蒙版按该尺寸用
+geo_utils.create_ocean_mask 重新生成（确定性结果，与生产完全一致）。
+
+任意历史时间点都可作为预览源；每个时间点可在页面上打 tag（如 晴朗天空/多云/薄雾，
+持久化在数据库 preview_tags 表），把真实分析结果当作"分类型测试样本"并按 tag 筛选。
+本模块只负责读取 tag 用于展示与筛选，写入见 tools.py 的 /tools/api/preview_tags。
 
 缓存
 ----
 - 预处理结果（RGB / HSV / 蒙版 / 源图预览 data URL）按 source 缓存，LRU 最多 4 个；
-- 海洋蒙版按 (宽, 高) 缓存，多个同尺寸 analysis 源共用。
+- 海洋蒙版按 (宽, 高) 缓存，多个同尺寸分析结果源共用。
 """
 
 import base64
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -35,16 +36,13 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import config, geo_utils, pipeline, processor, settings_store, super_resolution
+from . import config, crud, geo_utils, processor, settings_store
+from .database import SessionLocal
 
 # 分析结果预览源目录（与 main.run_analysis_and_persist 的输出目录一致）
 OUTPUT_BASE_DIR = Path(config.OUTPUT_BASE_DIR)
-# 测试图样本目录（与 tools.TEST_IMAGE_DIR 一致）
-TEST_IMAGE_DIR = Path("test_images")
 # 分析结果目录中用于预览的产物：已完成超分 + CLAHE + 海洋蒙版
 ANALYSIS_ARTIFACT = "03_ocean_only.png"
-# 最多展示多少个最新分析结果
-MAX_ANALYSIS_SOURCES = 8
 # 预处理缓存容量（LRU）
 MAX_PREPARED_CACHE = 4
 # 蒙版缓存容量
@@ -54,6 +52,9 @@ MAX_PREVIEW_SIDE = 1000
 # PNG 编码压缩级别：1 = 速度优先（预览是交互操作，体积略大无妨）
 _PNG_COMPRESSION = 1
 
+# 预览源 id 只接受 analysis:<数字时间戳>
+_ANALYSIS_SOURCE_PATTERN = re.compile(r"^analysis:(\d+)$")
+
 _TZ = ZoneInfo(config.TIME_ZONE)
 
 # 缓存与锁
@@ -62,71 +63,143 @@ _prepared_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _mask_cache: "OrderedDict[Tuple[int, int], np.ndarray]" = OrderedDict()
 
 
-# --- 图像源枚举 ---
+# --- 分析结果预览源 ---
 
-def _format_timestamp(ts: str) -> str:
-    """把 UNIX 时间戳（秒）格式化为 Asia/Shanghai 的可读时间。"""
-    return datetime.fromtimestamp(int(ts), tz=_TZ).strftime("%Y-%m-%d %H:%M")
+def analysis_artifact_path(timestamp: int) -> Path:
+    """返回某个时间点的预览图路径：data/output/<timestamp>/03_ocean_only.png。"""
+    return OUTPUT_BASE_DIR / str(int(timestamp)) / ANALYSIS_ARTIFACT
 
 
-def _analysis_sources() -> List[Dict[str, str]]:
-    """列出 data/output/<ts>/ 中可用的分析结果预览源（最新在前）。"""
+def analysis_source_exists(timestamp: int) -> bool:
+    """判断某个时间点是否有可用的分析结果预览图。"""
+    return analysis_artifact_path(timestamp).is_file()
+
+
+def _scan_analysis_timestamps() -> List[int]:
+    """
+    扫描 data/output 下所有可用的分析结果时间点（按时间倒序）。
+
+    只认「目录名为纯数字」且存在 03_ocean_only.png 的目录；
+    debug_* 等非数字目录（调试产物）一律排除。
+    """
     if not OUTPUT_BASE_DIR.is_dir():
         return []
 
-    found: List[Tuple[int, Dict[str, str]]] = []
+    timestamps: List[int] = []
     for entry in OUTPUT_BASE_DIR.iterdir():
         if not entry.is_dir() or not entry.name.isdigit():
             continue
         if not (entry / ANALYSIS_ARTIFACT).is_file():
             continue
         timestamp = int(entry.name)
-        found.append((
-            timestamp,
-            {
-                "id": f"analysis:{entry.name}",
-                "label": f"{_format_timestamp(entry.name)} 分析结果 ({entry.name})",
-                "kind": "analysis",
-            },
-        ))
-
-    found.sort(key=lambda item: item[0], reverse=True)
-    return [item[1] for item in found[:MAX_ANALYSIS_SOURCES]]
+        try:
+            # 目录名是纯数字但可能不是合法时间戳（如调试目录），格式化不了就跳过
+            datetime.fromtimestamp(timestamp, tz=_TZ)
+        except (OverflowError, OSError, ValueError):
+            continue
+        timestamps.append(timestamp)
+    timestamps.sort(reverse=True)
+    return timestamps
 
 
-def _test_sources() -> List[Dict[str, str]]:
-    """列出 test_images/ 下的测试样本预览源（按文件名排序）。"""
-    if not TEST_IMAGE_DIR.is_dir():
-        return []
-    files = sorted(
-        p for p in TEST_IMAGE_DIR.iterdir()
-        if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg")
-    )
-    return [
-        {"id": f"test:{p.name}", "label": p.name, "kind": "test"}
-        for p in files
-    ]
+def _format_datetime(ts: int) -> str:
+    """把 UNIX 时间戳（秒）格式化为 Asia/Shanghai 的 ISO8601（带 +08:00）。"""
+    return datetime.fromtimestamp(ts, tz=_TZ).isoformat()
+
+
+def _format_label(ts: int) -> str:
+    """把 UNIX 时间戳（秒）格式化为页面展示用的 YYYY-MM-DD HH:MM（Asia/Shanghai）。"""
+    return datetime.fromtimestamp(ts, tz=_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def _load_tag_data(
+    timestamps: List[int],
+) -> Tuple[Dict[int, List[str]], List[Dict[str, Any]]]:
+    """
+    从数据库读取预览源 tag 数据（一次批量查询 + 一次全库统计）。
+
+    Returns:
+        (tag_map, tag_counts)
+        tag_map    = {timestamp: [tag, ...]}
+        tag_counts = [{"tag": tag, "count": 打该 tag 的时间戳数}, ...]
+
+    数据库不可用时打印警告并返回空标签（页面仍可正常列出预览源），
+    不让标签数据影响阈值调参主流程。
+    """
+    db = None
+    try:
+        db = SessionLocal()
+        tag_map = crud.get_preview_tags_map(db, timestamps)
+        counts = crud.list_preview_tag_counts(db)
+    except Exception as exc:
+        print(f"[ThresholdPreview] 读取预览标签失败，按无标签返回: {exc}")
+        return {}, []
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    tag_counts = [{"tag": tag, "count": int(count)} for tag, count in counts]
+    return tag_map, tag_counts
 
 
 def list_sources() -> Dict[str, Any]:
     """
-    返回可预览的图像源列表与默认源。
+    列出全部可预览的分析结果源（时间倒序，最多 PREVIEW_SOURCE_MAX_RETURN 个）。
 
-    {"sources": [{"id", "label", "kind"}...], "default": "analysis:<ts>" | None}
+    Returns:
+        {
+          "sources": [{"id", "kind", "timestamp", "datetime", "label", "tags"}, ...],
+          "default": "analysis:<ts>" | None,
+          "tags": [{"tag", "count"}, ...],
+          "presets": [...],
+          "total": 全部可用时间点数量,
+          "truncated": 是否因数量上限被截断
+        }
     """
-    analysis = _analysis_sources()
-    tests = _test_sources()
-    sources = analysis + tests
-    default = analysis[0]["id"] if analysis else (tests[0]["id"] if tests else None)
-    return {"sources": sources, "default": default}
+    all_timestamps = _scan_analysis_timestamps()
+    total = len(all_timestamps)
+    max_return = max(1, int(config.PREVIEW_SOURCE_MAX_RETURN))
+    selected = all_timestamps[:max_return]
+
+    tag_map, tag_counts = _load_tag_data(selected)
+
+    sources = [
+        {
+            "id": f"analysis:{ts}",
+            "kind": "analysis",
+            "timestamp": ts,
+            "datetime": _format_datetime(ts),
+            "label": _format_label(ts),
+            "tags": tag_map.get(ts, []),
+        }
+        for ts in selected
+    ]
+
+    return {
+        "sources": sources,
+        "default": sources[0]["id"] if sources else None,
+        "tags": tag_counts,
+        "presets": list(config.PREVIEW_TAG_PRESETS),
+        "total": total,
+        "truncated": total > len(selected),
+    }
 
 
-def _resolve_source(source_id: str) -> Dict[str, str]:
-    """按 id 查找图像源；未知 id 抛 ValueError（中文提示）。"""
-    for source in _analysis_sources() + _test_sources():
-        if source["id"] == source_id:
-            return source
-    raise ValueError(f"未知的预览图片源: {source_id}")
+def _parse_analysis_source(source_id: Any) -> int:
+    """
+    解析 analysis:<timestamp> 形式的预览源 id，返回时间戳。
+
+    只接受分析结果源；test: 等其他来源或非法格式抛 ValueError（中文提示）。
+    """
+    match = _ANALYSIS_SOURCE_PATTERN.match(source_id) if isinstance(source_id, str) else None
+    if match is None:
+        raise ValueError(
+            f"仅支持分析结果预览源（analysis:<timestamp>）：{source_id}"
+        )
+    return int(match.group(1))
 
 
 # --- 预处理（每个源只做一次）---
@@ -174,10 +247,9 @@ def _png_data_url(rgb: np.ndarray) -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
 
 
-def _prepare_analysis_source(source_id: str) -> Dict[str, Any]:
+def _prepare_analysis_source(timestamp: int) -> Dict[str, Any]:
     """准备 analysis 源：读取 03_ocean_only.png，重建海洋蒙版，缓存 RGB/HSV/预览图。"""
-    timestamp = source_id.split(":", 1)[1]
-    artifact_path = OUTPUT_BASE_DIR / timestamp / ANALYSIS_ARTIFACT
+    artifact_path = analysis_artifact_path(timestamp)
     if not artifact_path.is_file():
         raise ValueError(f"分析结果图不存在（可能已被清理）: {artifact_path.as_posix()}")
 
@@ -185,32 +257,8 @@ def _prepare_analysis_source(source_id: str) -> Dict[str, Any]:
     rgb = np.array(image)
     height, width = rgb.shape[:2]
     ocean_mask = _ocean_mask_for_shape(height, width)
-    print(f"[ThresholdPreview] 已加载分析结果预览源 {source_id} ({width}x{height})")
+    print(f"[ThresholdPreview] 已加载分析结果预览源 analysis:{timestamp} ({width}x{height})")
     return _build_prepared(rgb, ocean_mask)
-
-
-def _prepare_test_source(source_id: str) -> Dict[str, Any]:
-    """准备 test 源：跑一次超分 + CLAHE + 蒙版（与生产预处理一致），缓存结果。"""
-    filename = source_id.split(":", 1)[1]
-    image_path = TEST_IMAGE_DIR / filename
-    if not image_path.is_file():
-        raise ValueError(f"测试图片不存在: {image_path.as_posix()}")
-
-    image = Image.open(image_path).convert("RGB")
-    image_array = np.array(image)
-    # 与生产链路一致：Real-ESRGAN x4 超分（失败自动降级 bicubic）
-    upscaled_rgb = super_resolution.enhance(image_array)
-    # 与生产链路一致：在 BGR 空间做 CLAHE 自动色彩均衡
-    balanced_bgr = pipeline._auto_balance_color(
-        cv2.cvtColor(upscaled_rgb, cv2.COLOR_RGB2BGR)
-    )
-    balanced_rgb = cv2.cvtColor(balanced_bgr, cv2.COLOR_BGR2RGB)
-    # 测试图是裁剪样本，用全图海洋蒙版（不对应真实地理范围，仅供参考调参）
-    height, width = balanced_rgb.shape[:2]
-    ocean_mask = np.full((height, width), 255, dtype=np.uint8)
-    ocean_only = geo_utils.apply_mask(Image.fromarray(balanced_rgb), ocean_mask)
-    print(f"[ThresholdPreview] 已准备测试图预览源 {source_id} ({width}x{height})")
-    return _build_prepared(ocean_only, ocean_mask)
 
 
 def _build_prepared(rgb: np.ndarray, ocean_mask: np.ndarray) -> Dict[str, Any]:
@@ -226,23 +274,17 @@ def _build_prepared(rgb: np.ndarray, ocean_mask: np.ndarray) -> Dict[str, Any]:
     }
 
 
-def _get_prepared(source_id: str) -> Dict[str, Any]:
-    """获取（必要时构建）某个源的预处理结果；LRU 缓存，最多保留 4 个源。"""
-    # 先校验源合法，避免对任意字符串做路径拼接
-    source = _resolve_source(source_id)
-
+def _get_prepared(timestamp: int) -> Dict[str, Any]:
+    """获取（必要时构建）某个分析结果源的预处理结果；LRU 缓存，最多保留 4 个源。"""
+    cache_key = f"analysis:{timestamp}"
     with _cache_lock:
-        cached = _prepared_cache.get(source_id)
+        cached = _prepared_cache.get(cache_key)
         if cached is not None:
-            _prepared_cache.move_to_end(source_id)
+            _prepared_cache.move_to_end(cache_key)
             return cached
 
-        if source["kind"] == "analysis":
-            prepared = _prepare_analysis_source(source_id)
-        else:
-            prepared = _prepare_test_source(source_id)
-
-        _prepared_cache[source_id] = prepared
+        prepared = _prepare_analysis_source(timestamp)
+        _prepared_cache[cache_key] = prepared
         while len(_prepared_cache) > MAX_PREPARED_CACHE:
             _prepared_cache.popitem(last=False)
         return prepared
@@ -252,10 +294,10 @@ def _get_prepared(source_id: str) -> Dict[str, Any]:
 
 def render_preview(source_id: str, ranges: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    对指定图像源用给定阈值做一次 HSV 分类 + 着色 + 指标计算，返回可传输的预览结果。
+    对指定分析结果源用给定阈值做一次 HSV 分类 + 着色 + 指标计算，返回可传输的预览结果。
 
     Args:
-        source_id: list_sources() 返回的 id（analysis:<ts> 或 test:<filename>）。
+        source_id: 只支持 analysis:<timestamp>（timestamp 为 data/output/ 下的时间戳目录名）。
         ranges: 可选 HSV 阈值；为 None 时使用当前生效阈值（settings_store）。
 
     Returns:
@@ -267,7 +309,7 @@ def render_preview(source_id: str, ranges: Optional[Dict[str, Any]] = None) -> D
           "elapsedMs": int
         }
 
-    校验失败抛 SettingsValidationError（400），未知源/图片缺失抛 ValueError（400）。
+    非分析结果源抛 ValueError（400），阈值校验失败抛 SettingsValidationError（400）。
     调用过程不写任何文件。
     """
     started = time.perf_counter()
@@ -278,10 +320,13 @@ def render_preview(source_id: str, ranges: Optional[Dict[str, Any]] = None) -> D
     else:
         effective_ranges = None
 
-    # 2. 取预处理结果（首次数秒，命中缓存后为毫秒级）
-    prepared = _get_prepared(source_id)
+    # 2. 只接受 analysis:<timestamp>（test: 等其他来源直接报错，不再做 ESRGAN 预处理）
+    timestamp = _parse_analysis_source(source_id)
 
-    # 3. 分类 + 着色 + 指标，全部复用生产实现
+    # 3. 取预处理结果（首次读图 + 建蒙版，命中缓存后为毫秒级）
+    prepared = _get_prepared(timestamp)
+
+    # 4. 分类 + 着色 + 指标，全部复用生产实现
     if effective_ranges is None:
         effective_ranges = settings_store.get_hsv_ranges()
 
@@ -303,7 +348,7 @@ def render_preview(source_id: str, ranges: Optional[Dict[str, Any]] = None) -> D
         verbose=False,
     )
 
-    # 4. 下采样 + PNG 编码（分类图体积很小，源图预览已在预处理时编码好）
+    # 5. 下采样 + PNG 编码（分类图体积很小，源图预览已在预处理时编码好）
     classification_preview = _downscale(classification_rgb)
     classification_url = _png_data_url(classification_preview)
 
