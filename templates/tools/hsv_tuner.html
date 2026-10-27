@@ -26,6 +26,10 @@
         th { background-color: #f2f2f2; }
         td img { max-width: 360px; height: auto; border-radius: 4px; display: block; }
         .metrics { font-family: monospace; white-space: pre; font-size: 12px; }
+        .tool-link { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid #cfe3fa; border-radius: 6px; background: #eef5ff; font-size: 13px; line-height: 1.5; }
+        .tool-link a { color: #007bff; font-weight: 600; text-decoration: none; }
+        .tool-link a:hover { text-decoration: underline; }
+        .tool-link span { display: block; margin-top: 2px; color: #5b6b7f; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -33,6 +37,10 @@
 
     <aside class="sidebar">
         <h1>HSV 参数</h1>
+        <p class="tool-link">
+            <a href="/tools/color_thresholds">→ 前往「颜色阈值实时调优」</a>
+            <span>滑块拖动即时预览、保存后写入 PostgreSQL，下一次分析无需重启即生效。</span>
+        </p>
         <p>在此处调整参数，然后点击按钮，将它们应用于 `test_images` 目录中的所有图片。</p>
         
         <div id="hsv-controls">

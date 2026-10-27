@@ -1,5 +1,5 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy import Column, DateTime, Integer, String, Float, Text
 from .database import Base
 
 class AnalysisResult(Base):
@@ -26,3 +26,18 @@ class AnalysisResult(Base):
     yellow_pixels = Column(Integer, nullable=True)
     cloud_pixels = Column(Integer, nullable=True)
     total_ocean_pixels = Column(Integer, nullable=True)
+
+
+class AppSetting(Base):
+    """
+    运行时应用设置（键值对，value 为 JSON 文本）。
+
+    用于存放可在网页上在线调整、且调整后立即生效的配置（当前为 HSV 颜色阈值，
+    key = "hsv_color_ranges"）。配置不再写死在 .env / config.py 中：
+    数据库无记录时回退 config.DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES 兜底。
+    """
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)          # JSON 文本
+    updated_at = Column(DateTime(timezone=True), nullable=False)

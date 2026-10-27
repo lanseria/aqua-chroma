@@ -117,7 +117,13 @@ FAILED_TIMESTAMP_RETRY_DELAY_SECONDS = 30
 # --- 2. HSV 颜色空间分类配置 ---
 # 基于像素的颜色范围阈值法，取代 K-Means。
 # 注意: OpenCV 中的 HSV 范围: H:[0, 179], S:[0, 255], V:[0, 255]
-COLOR_CLASSIFICATION_HSV_RANGES = {
+#
+# 【重要】HSV 阈值是「运行时配置」，权威值存放在数据库 app_settings 表
+# （key = "hsv_color_ranges"，由 app/settings_store.py 读写），可在网页
+# /tools/color_thresholds 上实时调整，保存后下一次分析立即生效，无需重启。
+# 下面这份字典只是「数据库中没有有效记录」时的兜底默认值（以及页面上的"恢复默认"目标），
+# 不要把它当作现行阈值，也不要为了改阈值而改这里——请到页面/API 修改。
+DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES = {
     # 云/白沫/高亮反光: 通常具有很低的饱和度(S)和很高的明度(V)。
     "CLOUD": {
         "lower": [0, 0, 121],
@@ -132,7 +138,7 @@ COLOR_CLASSIFICATION_HSV_RANGES = {
 }
 
 # --- 分类结果图着色配置 (仅影响 04_hsv_classification.png 的可视化) ---
-# 云/海蓝/海黄的三分类判定逻辑与阈值（COLOR_CLASSIFICATION_HSV_RANGES）完全不受本配置影响，
+# 云/海蓝/海黄的三分类判定逻辑与阈值（DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES）完全不受本配置影响，
 # 这里只改变分类图怎么画：不再用 3 种纯色平涂，而是在每个类别内部按像素明度 V 分出深浅，
 # 直观呈现云层厚薄、海水颜色深浅与浑浊程度。着色只借用已分类像素的 V 通道，不改变像素归属。
 #

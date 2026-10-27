@@ -1,0 +1,2075 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>颜色阈值实时调优 · Aqua-Chroma</title>
+    <style>
+        /* ============================================================
+           颜色阈值实时调优 —— 单文件模板（内联样式，离线可用）
+           设计基调：浅色仪表盘，密集但克制；所有数值使用等宽字体。
+           ============================================================ */
+        :root {
+            --bg: #f4f7f9;
+            --panel: #ffffff;
+            --panel-2: #fbfdff;
+            --ink: #14263c;
+            --ink-soft: #3c4e63;
+            --muted: #64748b;
+            --muted-2: #8595a8;
+            --line: #e2e9f1;
+            --line-strong: #cfdae6;
+            --accent: #007bff;
+            --accent-dark: #0063d1;
+            --accent-soft: #e8f2ff;
+            --water: #1f7ae0;
+            --cloud: #7d8fa3;
+            --ok: #0f7b5f;
+            --ok-soft: #e6f6f0;
+            --warn: #a35c00;
+            --warn-soft: #fff4e0;
+            --danger: #c62828;
+            --danger-soft: #fdeceb;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --shadow: 0 1px 2px rgba(16, 38, 64, .05), 0 8px 24px -12px rgba(16, 38, 64, .18);
+            --shadow-soft: 0 1px 2px rgba(16, 38, 64, .04), 0 2px 8px rgba(16, 38, 64, .05);
+            --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { margin: 0; }
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--font);
+            font-size: 14px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+        [hidden] { display: none !important; }
+
+        a { color: var(--accent); }
+        a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .skip-link {
+            position: absolute;
+            left: -9999px;
+            top: 8px;
+            z-index: 80;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: var(--shadow);
+            font-size: 12px;
+        }
+        .skip-link:focus { left: 12px; }
+
+        /* ---------- 顶栏 ---------- */
+        .topbar {
+            position: relative;
+            padding: 14px 22px 12px;
+            background: linear-gradient(180deg, #ffffff, #fdfefe);
+            border-bottom: 1px solid var(--line);
+        }
+        .topbar::after {
+            content: "";
+            position: absolute;
+            left: 0; right: 0; bottom: -1px;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent), #37c2b0 55%, rgba(55, 194, 176, 0));
+            opacity: .55;
+            pointer-events: none;
+        }
+        .topbar-main {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+        .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+        .brand-mark {
+            flex: 0 0 auto;
+            width: 38px; height: 38px;
+            border-radius: 11px;
+            display: grid; place-items: center;
+            color: #fff;
+            background: linear-gradient(135deg, #0b74e5, #1fb6c9);
+            box-shadow: 0 6px 16px -8px rgba(11, 116, 229, .7);
+        }
+        .brand-text { min-width: 0; }
+        .brand-text h1 {
+            margin: 0;
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: .01em;
+            color: var(--ink);
+        }
+        .brand-text p {
+            margin: 3px 0 0;
+            max-width: 660px;
+            font-size: 12.5px;
+            color: var(--muted);
+        }
+        .topbar-links { display: flex; gap: 8px; flex-wrap: wrap; }
+        .link-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 32px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line-strong);
+            background: #fff;
+            color: var(--ink-soft);
+            font-size: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: background .15s, border-color .15s, color .15s;
+        }
+        .link-btn:hover { background: var(--accent-soft); border-color: #b9d6f7; color: var(--accent-dark); }
+        .topbar-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 26px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #fff;
+            font-size: 12px;
+            color: var(--ink-soft);
+            white-space: nowrap;
+        }
+        .chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); flex: 0 0 auto; }
+        .chip-source[data-source="db"] { border-color: #bfe0c8; background: var(--ok-soft); color: var(--ok); }
+        .chip-source[data-source="db"] .chip-dot { background: var(--ok); }
+        .chip-source[data-source="default"] { border-color: #cfe3fa; background: var(--accent-soft); color: #2f6db3; }
+        .chip-source[data-source="default"] .chip-dot { background: var(--accent); }
+        .chip-time { color: var(--muted); }
+        .chip-time b {
+            font-family: var(--mono);
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--ink);
+            font-variant-numeric: tabular-nums;
+        }
+        .chip-dirty { border-color: #f3d7a8; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+        .chip-dirty::before {
+            content: "";
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 1.6s ease-in-out infinite;
+        }
+        .save-note {
+            font-size: 11.5px;
+            color: var(--muted);
+            font-family: var(--mono);
+            min-height: 18px;
+        }
+
+        /* ---------- 错误提示 ---------- */
+        .alert {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin: 14px 22px 0;
+            padding: 12px 14px;
+            border: 1px solid #f3c9c6;
+            border-radius: 12px;
+            background: #fff7f6;
+            box-shadow: var(--shadow-soft);
+        }
+        .alert-icon {
+            flex: 0 0 auto;
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            display: grid; place-items: center;
+            background: var(--danger);
+            color: #fff;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .alert-body { flex: 1 1 auto; min-width: 0; font-size: 13px; }
+        .alert-body strong { display: block; margin-bottom: 2px; color: #8f1f1f; }
+        .alert-body ul { margin: 4px 0 0; padding-left: 18px; color: #7a3b3b; }
+        .alert-body li { margin: 1px 0; }
+        .alert-close {
+            flex: 0 0 auto;
+            width: 32px; height: 32px;
+            margin: -4px -4px 0 0;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            color: #8f1f1f;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .alert-close:hover { background: #fbe3e0; border-color: #f0c6c3; }
+
+        /* ---------- 布局 ---------- */
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+            max-width: 1680px;
+            margin: 0 auto;
+            padding: 18px 22px 28px;
+        }
+        .sidebar {
+            position: sticky;
+            top: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: calc(100vh - 28px);
+            min-width: 0;
+        }
+        .sidebar-scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding-right: 2px;
+            scrollbar-width: thin;
+        }
+        .sidebar-scroll::-webkit-scrollbar { width: 8px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: #d5e0ea; border-radius: 999px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+
+        .group,
+        .action-dock,
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-soft);
+        }
+        .group { padding: 12px 14px 13px; }
+        .group-head { display: flex; align-items: flex-start; gap: 10px; }
+        .group-icon {
+            flex: 0 0 auto;
+            width: 30px; height: 30px;
+            border-radius: 9px;
+            display: grid; place-items: center;
+        }
+        .group[data-class="CLOUD"] .group-icon { background: #eef3f8; color: #4f6479; }
+        .group[data-class="BLUE_WATER"] .group-icon { background: var(--accent-soft); color: var(--water); }
+        .group-title { min-width: 0; }
+        .group-title h2 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--ink);
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .group-code { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: .06em; }
+        .group-caption { margin: 1px 0 0; font-size: 11px; color: var(--muted-2); }
+        .group-head .btn { margin-left: auto; }
+
+        .bound { margin-top: 9px; }
+        .bound-head {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            margin-bottom: 3px;
+            padding-top: 8px;
+            border-top: 1px dashed var(--line);
+        }
+        .bound-name { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); letter-spacing: .04em; }
+        .bound-en { font-family: var(--mono); font-size: 10px; color: var(--muted-2); letter-spacing: .08em; text-transform: uppercase; }
+
+        .ctrl {
+            display: grid;
+            grid-template-columns: 76px minmax(0, 1fr) 62px;
+            gap: 10px;
+            align-items: center;
+            min-height: 34px;
+            padding: 2px 0;
+        }
+        .ctrl-label {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            line-height: 1.15;
+            cursor: pointer;
+            user-select: none;
+        }
+        .ctrl-label b { font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+        .ctrl-label small { font-family: var(--mono); font-size: 10px; color: var(--muted-2); }
+
+        .range {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 32px; /* 保持 >=32px 的可点击命中区域 */
+            margin: 0;
+            background: transparent;
+            cursor: pointer;
+        }
+        .range::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--accent) var(--fill, 0%), #e4ebf2 var(--fill, 0%));
+        }
+        .range::-moz-range-track {
+            height: 6px;
+            border-radius: 999px;
+            background: #e4ebf2;
+        }
+        .range::-moz-range-progress {
+            height: 6px;
+            border-radius: 999px;
+            background: var(--accent);
+        }
+        .range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px; height: 16px;
+            margin-top: -5px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid var(--accent);
+            box-shadow: 0 1px 3px rgba(16, 32, 64, .28);
+            transition: transform .12s ease, box-shadow .12s ease;
+        }
+        .range::-moz-range-thumb {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid var(--accent);
+            box-shadow: 0 1px 3px rgba(16, 32, 64, .28);
+        }
+        .range:hover::-webkit-slider-thumb { transform: scale(1.08); }
+        .range:active::-webkit-slider-thumb { transform: scale(1.16); box-shadow: 0 0 0 5px rgba(0, 123, 255, .14); }
+        .range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 999px; }
+
+        .num {
+            width: 100%;
+            min-height: 32px;
+            padding: 4px 6px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: var(--panel-2);
+            color: var(--ink);
+            font-family: var(--mono);
+            font-size: 12.5px;
+            font-weight: 600;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            -moz-appearance: textfield;
+            appearance: textfield;
+            transition: border-color .15s, background .15s;
+        }
+        .num::-webkit-outer-spin-button,
+        .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .num:hover { border-color: #a9bccd; }
+        .num:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+        .num.is-invalid { border-color: var(--danger); background: #fff6f6; color: #a11d1d; }
+        .num:disabled { opacity: .6; }
+
+        /* ---------- 阈值带 ---------- */
+        .bands {
+            --bh: 210deg;
+            margin-top: 10px;
+            padding-top: 9px;
+            border-top: 1px dashed var(--line);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .bands-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .bands-title { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: var(--muted-2); text-transform: uppercase; }
+        .corners { display: flex; align-items: center; gap: 10px; }
+        .corner { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); }
+        .corner-chip {
+            width: 15px; height: 15px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 0, 0, .18);
+            background: repeating-conic-gradient(#dfe6ee 0 25%, #f7fafc 0 50%) 50% / 8px 8px;
+        }
+        .band-row {
+            display: grid;
+            grid-template-columns: 12px minmax(0, 1fr) 62px;
+            align-items: center;
+            gap: 8px;
+        }
+        .band-label { font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--muted); }
+        .band {
+            position: relative;
+            display: block;
+            height: 10px;
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            overflow: hidden;
+            background: #eef2f6;
+        }
+        .band-track { position: absolute; inset: 0; display: block; opacity: .9; }
+        .band-track[data-kind="H"] {
+            background: linear-gradient(90deg, #ff4d4d 0%, #ff9a3d 8.3%, #f4e03b 16.6%, #5fd45a 25%, #3fd6a0 33.3%, #3fd0d6 41.6%, #4a9bff 50%, #5b6bff 58.3%, #a35bff 66.6%, #e05bff 75%, #ff5bd0 83.3%, #ff5b8a 91.6%, #ff4d4d 100%);
+        }
+        .band-track[data-kind="S"] {
+            background: linear-gradient(90deg, hsl(var(--bh, 210deg) 0% 60%), hsl(var(--bh, 210deg) 95% 52%));
+        }
+        .band-track[data-kind="V"] {
+            background: linear-gradient(90deg, #0b1220, hsl(var(--bh, 210deg) 90% 58%));
+        }
+        .band-window {
+            position: absolute;
+            top: 0; bottom: 0;
+            left: 0;
+            width: 0;
+            border-left: 2px solid #0b3d91;
+            border-right: 2px solid #0b3d91;
+            background: rgba(255, 255, 255, .06);
+            box-shadow: 0 0 0 999px rgba(248, 251, 254, .58);
+            display: block;
+        }
+        .band-range {
+            font-family: var(--mono);
+            font-size: 10.5px;
+            color: var(--muted);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ---------- 操作区 ---------- */
+        .action-dock {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            padding: 12px 14px;
+            background: linear-gradient(180deg, #ffffff, #f9fcff);
+        }
+        .validation {
+            border: 1px solid #f3c9c6;
+            border-radius: 10px;
+            background: #fff7f6;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #8f1f1f;
+        }
+        .validation-title { margin: 0 0 4px; font-weight: 700; }
+        .validation ul { margin: 0; padding-left: 18px; max-height: 132px; overflow-y: auto; }
+        .validation li { margin: 1px 0; }
+        .dock-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .dock-actions .btn-primary { grid-column: 1 / -1; }
+        .dock-hint {
+            margin: 0;
+            font-size: 11px;
+            color: var(--muted-2);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 5px;
+        }
+        kbd {
+            font-family: var(--mono);
+            font-size: 10.5px;
+            line-height: 1;
+            padding: 2px 5px;
+            border: 1px solid var(--line-strong);
+            border-bottom-width: 2px;
+            border-radius: 5px;
+            background: #f7fafc;
+            color: var(--ink-soft);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 34px;
+            padding: 6px 12px;
+            border-radius: 9px;
+            border: 1px solid var(--line-strong);
+            background: #fff;
+            color: var(--ink-soft);
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: background .15s, border-color .15s, box-shadow .15s, transform .12s;
+        }
+        .btn:hover:not(:disabled) { background: #f4f8fc; border-color: #b9cbdd; }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn:disabled { opacity: .48; cursor: not-allowed; }
+        .btn-sm { min-height: 32px; padding: 4px 10px; font-size: 11.5px; border-radius: 8px; }
+        .btn-primary {
+            min-height: 38px;
+            font-size: 13px;
+            border-color: var(--accent-dark);
+            background: linear-gradient(180deg, #0b84ff, #006be0);
+            color: #fff;
+            box-shadow: 0 1px 2px rgba(0, 80, 190, .25), 0 8px 18px -10px rgba(0, 110, 230, .75);
+        }
+        .btn-primary:hover:not(:disabled) { background: linear-gradient(180deg, #1a8dff, #0074f0); border-color: var(--accent-dark); }
+        .btn-primary.is-armed::before {
+            content: "";
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #ffe899;
+            box-shadow: 0 0 0 3px rgba(255, 232, 153, .22);
+        }
+        .btn-primary:disabled { background: #c6d3e0; border-color: #bccbdb; box-shadow: none; color: #f4f8fc; }
+        .btn-danger-ghost { color: var(--danger); border-color: #f0c6c3; background: #fffafa; }
+        .btn-danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: #e5a9a4; }
+
+        /* ---------- 预览区 ---------- */
+        .preview-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .card { padding: 14px 16px; }
+        .card-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .card-heading { min-width: 0; }
+        .card-heading h2 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: .04em;
+            color: var(--ink-soft);
+        }
+        .card-sub { margin: 2px 0 0; font-size: 11.5px; color: var(--muted-2); }
+        .badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            min-height: 24px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: var(--panel-2);
+            font-size: 11px;
+            color: var(--ink-soft);
+            white-space: nowrap;
+        }
+        .badge-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+        .badge[data-status="completed"] { border-color: #bfe0ce; background: var(--ok-soft); color: var(--ok); }
+        .badge[data-status="cloudy"] { border-color: #d3dfe9; background: #eef3f8; color: #45586d; }
+        .badge-latency { border-color: #cfe3fa; background: var(--accent-soft); color: #2f6db3; }
+
+        .source-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+        .field-label { font-size: 12px; font-weight: 600; color: var(--ink-soft); min-width: 44px; }
+        .source-select {
+            flex: 1 1 280px;
+            min-width: 220px;
+            max-width: 100%;
+            min-height: 34px;
+            padding: 5px 10px;
+            border: 1px solid var(--line-strong);
+            border-radius: 9px;
+            background: #fff;
+            color: var(--ink);
+            font: inherit;
+            font-size: 12.5px;
+            cursor: pointer;
+        }
+        .source-select:disabled { background: #f5f8fb; color: var(--muted); cursor: progress; }
+        .preview-hint {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            min-height: 18px;
+            margin: 9px 0 0;
+            font-size: 11.5px;
+            color: var(--muted);
+        }
+        .preview-hint::before {
+            content: "";
+            flex: 0 0 auto;
+            width: 6px; height: 6px;
+            margin-top: 6px;
+            border-radius: 50%;
+            background: var(--muted-2);
+        }
+        .preview-hint[data-tone="busy"] { color: #2f6db3; }
+        .preview-hint[data-tone="busy"]::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+        .preview-hint[data-tone="ok"] { color: var(--ok); }
+        .preview-hint[data-tone="ok"]::before { background: var(--ok); }
+        .preview-hint[data-tone="warn"] { color: var(--warn); }
+        .preview-hint[data-tone="warn"]::before { background: var(--warn); }
+        .preview-hint[data-tone="error"] { color: var(--danger); }
+        .preview-hint[data-tone="error"]::before { background: var(--danger); }
+
+        .img-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .img-fig { margin: 0; min-width: 0; }
+        .img-fig figcaption {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--ink-soft);
+        }
+        .src-tag { font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--muted-2); }
+        .img-frame {
+            position: relative;
+            display: grid;
+            place-items: center;
+            min-height: 240px;
+            padding: 6px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+            background: repeating-conic-gradient(#f1f5f9 0 25%, #fbfdff 0 50%) 50% / 16px 16px;
+        }
+        .img-frame.is-loaded { background: #fff; }
+        .img-frame img {
+            display: block;
+            max-width: 100%;
+            max-height: min(62vh, 560px);
+            height: auto;
+            border-radius: 8px;
+            opacity: 0;
+            transition: opacity .25s ease;
+        }
+        .img-frame.is-loaded img { opacity: 1; }
+        .frame-empty,
+        .frame-error { margin: 0; padding: 24px 12px; text-align: center; font-size: 12px; }
+        .frame-empty { color: var(--muted); }
+        .frame-error { display: none; color: var(--danger); }
+        .img-frame.is-error .frame-empty { display: none; }
+        .img-frame.is-error:not(.is-loaded) .frame-error { display: block; }
+        .img-frame.is-loaded .frame-empty,
+        .img-frame.is-loaded .frame-error { display: none; }
+        .img-frame.is-loading .frame-empty { display: none; }
+        .frame-veil {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 18px;
+            text-align: center;
+            background: rgba(244, 247, 249, .74);
+        }
+        .img-frame.is-loading .frame-veil { display: flex; }
+        .veil-text { max-width: 280px; font-size: 12px; color: var(--ink-soft); }
+        .spinner {
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            border: 2.5px solid #d7e3f0;
+            border-top-color: var(--accent);
+            animation: spin .9s linear infinite;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+            gap: 10px;
+        }
+        .metric {
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            background: linear-gradient(180deg, #ffffff, #fbfdff);
+        }
+        .metric-label { display: block; font-size: 11px; color: var(--muted); letter-spacing: .02em; }
+        .metric-value {
+            display: block;
+            margin-top: 2px;
+            font-family: var(--mono);
+            font-size: 19px;
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: -.01em;
+            color: var(--ink);
+            font-variant-numeric: tabular-nums;
+        }
+        .metric-hint {
+            display: block;
+            margin-top: 2px;
+            font-family: var(--mono);
+            font-size: 10.5px;
+            color: var(--muted-2);
+            overflow-wrap: anywhere;
+        }
+        .metric-bar { display: block; height: 5px; margin-top: 8px; border-radius: 999px; background: #edf2f7; overflow: hidden; }
+        .metric-bar i { display: block; width: 0; height: 100%; border-radius: 999px; background: var(--accent); transition: width .3s ease; }
+        .metric[data-tone="cloud"] .metric-bar i { background: #7d8fa3; }
+        .metric[data-tone="sea"] .metric-bar i { background: #1f7ae0; }
+        .metric[data-tone="index"] .metric-bar i { background: #12a594; }
+        .metrics-grid.is-empty .metric-value,
+        .metrics-grid.is-empty .metric-hint { color: #b3c0cf; }
+
+        /* ---------- Toast ---------- */
+        .toast {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            z-index: 60;
+            max-width: min(440px, calc(100vw - 40px));
+            padding: 11px 14px;
+            border-radius: 11px;
+            border: 1px solid rgba(255, 255, 255, .12);
+            background: #1c2b3d;
+            color: #fff;
+            font-size: 13px;
+            box-shadow: 0 14px 34px -14px rgba(10, 25, 45, .6);
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+            transition: opacity .2s ease, transform .2s ease;
+        }
+        .toast.is-visible { opacity: 1; transform: none; }
+        .toast.toast-ok { background: #0d5c46; }
+        .toast.toast-error { background: #8f1f1f; }
+        .toast.toast-info { background: #24425f; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+        /* ---------- 响应式 ---------- */
+        @media (max-width: 1099px) {
+            .layout { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 24px; }
+            .sidebar { position: static; max-height: none; }
+            .sidebar-scroll { overflow: visible; }
+            .ctrl { grid-template-columns: 88px minmax(0, 1fr) 68px; }
+            .alert { margin: 14px 16px 0; }
+        }
+        @media (max-width: 760px) {
+            .img-grid { grid-template-columns: minmax(0, 1fr); }
+            .topbar { padding: 12px 14px 10px; }
+            .topbar-main { gap: 10px; }
+            .layout { padding: 14px 14px 24px; }
+            .alert { margin: 12px 14px 0; }
+        }
+        @media (max-width: 560px) {
+            .ctrl { grid-template-columns: 72px minmax(0, 1fr) 60px; gap: 8px; }
+            .card { padding: 12px; }
+            .metric-value { font-size: 17px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: .001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .001ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+    </style>
+</head>
+<body>
+{% set bootstrap_state = initial_state if (initial_state is defined and initial_state) else none %}
+{% set class_defs = [
+    {'key': 'CLOUD', 'label': '云层', 'tone': 'cloud', 'caption': '云层 / 高亮区域'},
+    {'key': 'BLUE_WATER', 'label': '蓝水', 'tone': 'water', 'caption': '蓝色水体（可见海洋）'}
+] %}
+{% set bound_defs = [
+    {'key': 'lower', 'label': '下限', 'en': 'lower'},
+    {'key': 'upper', 'label': '上限', 'en': 'upper'}
+] %}
+{% set channel_defs = [
+    {'key': 'H', 'cn': '色相', 'min': 0, 'max': 179},
+    {'key': 'S', 'cn': '饱和度', 'min': 0, 'max': 255},
+    {'key': 'V', 'cn': '明度', 'min': 0, 'max': 255}
+] %}
+
+<a class="skip-link" href="#preview">跳到预览区</a>
+
+<header class="topbar">
+    <div class="topbar-main">
+        <div class="brand">
+            <span class="brand-mark" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 17c2.2 0 2.2-1.6 4.4-1.6S9.6 17 11.8 17s2.2-1.6 4.4-1.6S18.4 17 20.6 17"/>
+                    <path d="M12 3.4c2.6 3.3 5.2 5.9 5.2 8.9a5.2 5.2 0 0 1-10.4 0c0-3 2.6-5.6 5.2-8.9Z"/>
+                </svg>
+            </span>
+            <div class="brand-text">
+                <h1>颜色阈值实时调优</h1>
+                <p>保存的阈值持久化在 PostgreSQL 中，下一次定时分析立即使用新值——无需重启服务，也无需修改 .env 配置。</p>
+            </div>
+        </div>
+        <nav class="topbar-links" aria-label="页面导航">
+            <a class="link-btn" href="/tools/hsv_tuner">← HSV 批量调试器</a>
+            <a class="link-btn" href="/docs">API 文档</a>
+        </nav>
+    </div>
+    <div class="topbar-status">
+        <span id="source-chip" class="chip chip-source" data-source="unknown">
+            <span class="chip-dot" aria-hidden="true"></span>
+            <span id="source-chip-text">生效来源：读取中…</span>
+        </span>
+        <span class="chip chip-time">更新时间 <b id="updated-at">—</b></span>
+        <span id="dirty-badge" class="chip chip-dirty" hidden>未保存修改</span>
+        <span id="save-note" class="save-note" role="status" aria-live="polite"></span>
+    </div>
+</header>
+
+<div id="alert-box" class="alert" role="alert" hidden>
+    <div class="alert-icon" aria-hidden="true">!</div>
+    <div class="alert-body">
+        <strong id="alert-title">发生错误</strong>
+        <ul id="alert-details"></ul>
+    </div>
+    <button type="button" class="alert-close" id="alert-close" aria-label="关闭错误提示">×</button>
+</div>
+
+<main class="layout">
+    <aside class="sidebar" aria-label="HSV 阈值控制面板">
+        <div class="sidebar-scroll" id="controls">
+            {% for cls in class_defs %}
+            <section class="group" data-class="{{ cls.key }}">
+                <div class="group-head">
+                    <span class="group-icon" aria-hidden="true">
+                        {% if cls.tone == 'cloud' %}
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.5 18H7a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.8 10.5 3.75 3.75 0 0 1 17.5 18Z"/>
+                        </svg>
+                        {% else %}
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 3.2c3.1 3.9 6.3 7 6.3 10.6a6.3 6.3 0 0 1-12.6 0C5.7 10.2 8.9 7.1 12 3.2Z"/>
+                        </svg>
+                        {% endif %}
+                    </span>
+                    <div class="group-title">
+                        <h2>{{ cls.label }} <span class="group-code">{{ cls.key }}</span></h2>
+                        <p class="group-caption">{{ cls.caption }}</p>
+                    </div>
+                    <button type="button" class="btn btn-sm" data-action="load-defaults" data-class="{{ cls.key }}" title="仅填充表单，不写入数据库">载入默认值</button>
+                </div>
+
+                {% for bound in bound_defs %}
+                <div class="bound">
+                    <div class="bound-head">
+                        <span class="bound-name">{{ bound.label }}</span>
+                        <span class="bound-en">{{ bound.en }}</span>
+                    </div>
+                    {% for ch in channel_defs %}
+                    <div class="ctrl">
+                        <label class="ctrl-label" for="num-{{ cls.key }}-{{ bound.key }}-{{ ch.key }}" title="{{ cls.label }} {{ ch.cn }} {{ bound.label }}">
+                            <b>{{ ch.key }} {{ bound.label }}</b>
+                            <small data-bounds-hint="{{ ch.key }}">{{ ch.min }}–{{ ch.max }}</small>
+                        </label>
+                        <input class="range" type="range"
+                               id="rng-{{ cls.key }}-{{ bound.key }}-{{ ch.key }}"
+                               data-role="range" data-class="{{ cls.key }}" data-bound="{{ bound.key }}" data-ch="{{ ch.key }}"
+                               min="{{ ch.min }}" max="{{ ch.max }}" step="1" value="{{ ch.min }}"
+                               aria-label="{{ cls.label }} {{ ch.cn }} {{ bound.label }}滑块">
+                        <input class="num" type="number"
+                               id="num-{{ cls.key }}-{{ bound.key }}-{{ ch.key }}"
+                               data-role="num" data-class="{{ cls.key }}" data-bound="{{ bound.key }}" data-ch="{{ ch.key }}"
+                               min="{{ ch.min }}" max="{{ ch.max }}" step="1" value="{{ ch.min }}"
+                               inputmode="numeric" autocomplete="off" spellcheck="false">
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+
+                <div class="bands" data-bands-for="{{ cls.key }}">
+                    <div class="bands-head">
+                        <span class="bands-title">阈值带</span>
+                        <div class="corners">
+                            <span class="corner"><span class="corner-chip" data-corner="{{ cls.key }}-lower" aria-hidden="true"></span>下限色</span>
+                            <span class="corner"><span class="corner-chip" data-corner="{{ cls.key }}-upper" aria-hidden="true"></span>上限色</span>
+                        </div>
+                    </div>
+                    {% for band_ch in ['H', 'S', 'V'] %}
+                    <div class="band-row">
+                        <span class="band-label" title="{{ band_ch }} 通道当前阈值区间">{{ band_ch }}</span>
+                        <span class="band" data-band-class="{{ cls.key }}" data-band-ch="{{ band_ch }}">
+                            <span class="band-track" data-kind="{{ band_ch }}"></span>
+                            <span class="band-window" hidden></span>
+                        </span>
+                        <span class="band-range" data-band-range="{{ cls.key }}-{{ band_ch }}">—</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endfor %}
+        </div>
+
+        <div class="action-dock">
+            <div class="validation" id="validation-summary" hidden>
+                <p class="validation-title" id="validation-title"></p>
+                <ul id="validation-list"></ul>
+            </div>
+            <div class="dock-actions">
+                <button type="button" class="btn btn-primary" id="btn-save" disabled>保存并立即生效</button>
+                <button type="button" class="btn" id="btn-load-defaults" disabled title="仅填充表单，不写入数据库">载入默认值（不保存）</button>
+                <button type="button" class="btn btn-danger-ghost" id="btn-reset" disabled title="恢复内置默认阈值并立即覆盖数据库配置">恢复内置默认</button>
+            </div>
+            <p class="dock-hint">快捷键 <kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>S</kbd> 保存 · 预览请求自动防抖 180 ms · <kbd>Esc</kbd> 关闭错误提示</p>
+        </div>
+    </aside>
+
+    <section class="preview-col">
+        <section class="card" id="preview" aria-label="实时预览">
+            <div class="card-head">
+                <div class="card-heading">
+                    <h2>实时预览</h2>
+                    <p class="card-sub">阈值改动会立刻重算；首次载入时使用数据库中已保存的配置。</p>
+                </div>
+                <div class="badges">
+                    <span id="status-badge" class="badge" hidden>状态：—</span>
+                    <span id="latency-badge" class="badge badge-mono badge-latency" hidden>— ms</span>
+                    <span id="dims-badge" class="badge badge-mono" hidden>— × — px</span>
+                </div>
+            </div>
+            <div class="source-row">
+                <label class="field-label" for="source-select">预览源</label>
+                <select class="source-select" id="source-select" disabled>
+                    <option value="">正在读取预览源…</option>
+                </select>
+                <button type="button" class="btn btn-sm" id="btn-refresh-sources" title="重新读取预览源列表">刷新列表</button>
+                <button type="button" class="btn btn-sm" id="btn-rerun" disabled>重跑当前预览</button>
+            </div>
+            <p id="preview-hint" class="preview-hint" data-tone="busy" aria-live="polite">正在初始化…</p>
+        </section>
+
+        <section class="card" aria-label="预览图像">
+            <div class="img-grid">
+                <figure class="img-fig">
+                    <figcaption><span>处理后的输入</span><span class="src-tag">source_preview</span></figcaption>
+                    <div class="img-frame is-empty" id="frame-source">
+                        <img id="img-source" alt="处理后的输入图像（预览源）" decoding="async">
+                        <p class="frame-empty">等待首次预览…</p>
+                        <p class="frame-error">图像生成失败</p>
+                        <div class="frame-veil" aria-hidden="true">
+                            <span class="spinner"></span>
+                            <span class="veil-text">正在生成预览…</span>
+                        </div>
+                    </div>
+                </figure>
+                <figure class="img-fig">
+                    <figcaption><span>HSV 分类结果</span><span class="src-tag">classification</span></figcaption>
+                    <div class="img-frame is-empty" id="frame-classification">
+                        <img id="img-classification" alt="HSV 颜色分类结果图" decoding="async">
+                        <p class="frame-empty">等待首次预览…</p>
+                        <p class="frame-error">图像生成失败</p>
+                        <div class="frame-veil" aria-hidden="true">
+                            <span class="spinner"></span>
+                            <span class="veil-text">正在生成预览…</span>
+                        </div>
+                    </div>
+                </figure>
+            </div>
+        </section>
+
+        <section class="card" aria-label="分析指标">
+            <div class="card-head">
+                <div class="card-heading">
+                    <h2>分析指标</h2>
+                    <p class="card-sub">随预览实时更新；显示为 “—” 表示该指标在当前预览源上未计算。</p>
+                </div>
+            </div>
+            <div class="metrics-grid is-empty" id="metrics">
+                <div class="metric" data-tone="cloud">
+                    <span class="metric-label">云量覆盖率</span>
+                    <span class="metric-value" id="m-cloud">—</span>
+                    <span class="metric-hint">cloudCoverage</span>
+                    <span class="metric-bar" aria-hidden="true"><i id="bar-cloud"></i></span>
+                </div>
+                <div class="metric" data-tone="sea">
+                    <span class="metric-label">海蓝程度（可见水体）</span>
+                    <span class="metric-value" id="m-sea">—</span>
+                    <span class="metric-hint">seaBlueness</span>
+                    <span class="metric-bar" aria-hidden="true"><i id="bar-sea"></i></span>
+                </div>
+                <div class="metric" data-tone="index">
+                    <span class="metric-label">综合海蓝指数</span>
+                    <span class="metric-value" id="m-index">—</span>
+                    <span class="metric-hint">bluenessIndex</span>
+                    <span class="metric-bar" aria-hidden="true"><i id="bar-index"></i></span>
+                </div>
+                <div class="metric" data-tone="index">
+                    <span class="metric-label">能见度</span>
+                    <span class="metric-value" id="m-visibility">—</span>
+                    <span class="metric-hint" id="m-visibility-level">等级：—</span>
+                </div>
+                <div class="metric" data-tone="sea">
+                    <span class="metric-label">蓝水像素</span>
+                    <span class="metric-value" id="m-blue">—</span>
+                    <span class="metric-hint" id="m-blue-pct">占比 —</span>
+                </div>
+                <div class="metric" data-tone="cloud">
+                    <span class="metric-label">黄水像素</span>
+                    <span class="metric-value" id="m-yellow">—</span>
+                    <span class="metric-hint" id="m-yellow-pct">占比 —</span>
+                </div>
+                <div class="metric" data-tone="cloud">
+                    <span class="metric-label">云像素</span>
+                    <span class="metric-value" id="m-cloud-px">—</span>
+                    <span class="metric-hint">cloudPixels</span>
+                </div>
+                <div class="metric" data-tone="sea">
+                    <span class="metric-label">海洋总像素</span>
+                    <span class="metric-value" id="m-ocean">—</span>
+                    <span class="metric-hint">totalOceanPixels</span>
+                </div>
+            </div>
+        </section>
+    </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* =====================================================================
+       服务端注入的初始快照（可选）。仅用于首屏快速渲染，页面启动后仍会从
+       GET /tools/api/color_thresholds 拉取权威状态；缺失时安全退化为纯前端拉取。
+       ===================================================================== */
+    var BOOTSTRAP = ({{ bootstrap_state | tojson }});
+    var CLASS_DEFS = {{ class_defs | tojson }};
+
+    var API_STATE = '/tools/api/color_thresholds';
+    var API_RESET = '/tools/api/color_thresholds/reset';
+    var API_SOURCES = '/tools/api/preview_sources';
+    var API_PREVIEW = '/tools/api/threshold_preview';
+
+    var DEBOUNCE_MS = 180;
+    var BOUND_FALLBACK = { H: [0, 179], S: [0, 255], V: [0, 255] };
+    var CH_INDEX = { H: 0, S: 1, V: 2 };
+    var BOUND_CN = { lower: '下限', upper: '上限' };
+
+    /* ---------------- 运行时状态 ---------------- */
+    var model = emptyModel();          // 当前表单值（NaN 表示非法输入）
+    var savedRanges = null;            // 与数据库一致的基准（脏标记用）
+    var defaultsRanges = null;         // 内置默认值
+    var bounds = { H: [0, 179], S: [0, 255], V: [0, 255] };
+    var effectiveSource = 'default';   // 'db' | 'default'
+    var updatedAt = null;
+    var stateLoaded = false;           // 权威状态是否已就绪（决定能否保存）
+    var touched = false;               // 用户是否已手动改过表单
+    var baselineApplied = false;       // 表单是否已经用「真实基准」填充过（防止用空模型覆盖/保存）
+    var saving = false;
+    var currentSource = '';
+    var sourceKind = '';
+    var firstPreview = true;           // 首次预览传 ranges=null，让服务端使用已保存配置
+    var previewRequested = false;      // 是否已用表单值请求过预览
+    var seq = 0;                       // 预览请求序号，防止旧响应覆盖新结果
+    var inflight = null;               // 当前预览请求的 AbortController
+    var debounceId = null;
+    var toastTimer = null;
+
+    /* ---------------- 基础工具 ---------------- */
+    function $(id) { return document.getElementById(id); }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function isNum(value) { return typeof value === 'number' && isFinite(value); }
+
+    function channelBounds(ch) {
+        var pair = bounds && bounds[ch];
+        return (Array.isArray(pair) && pair.length === 2) ? pair : BOUND_FALLBACK[ch];
+    }
+
+    function emptyModel() {
+        var result = {};
+        CLASS_DEFS.forEach(function (def) {
+            result[def.key] = { lower: [0, 0, 0], upper: [0, 0, 0] };
+        });
+        return result;
+    }
+
+    function toInt(value, fallbackValue) {
+        var n = Number(value);
+        if (!isFinite(n)) {
+            var f = Number(fallbackValue);
+            return isFinite(f) ? Math.round(f) : 0;
+        }
+        return Math.round(n);
+    }
+
+    function normalizeRanges(input, fallback) {
+        var result = {};
+        CLASS_DEFS.forEach(function (def) {
+            var base = (fallback && fallback[def.key]) || { lower: [0, 0, 0], upper: [0, 255, 255] };
+            var raw = (input && input[def.key]) || base;
+            var lower = Array.isArray(raw.lower) ? raw.lower : base.lower;
+            var upper = Array.isArray(raw.upper) ? raw.upper : base.upper;
+            result[def.key] = {
+                lower: [0, 1, 2].map(function (i) { return toInt(lower[i], base.lower[i]); }),
+                upper: [0, 1, 2].map(function (i) { return toInt(upper[i], base.upper[i]); })
+            };
+        });
+        return result;
+    }
+
+    // 稳定的表单签名，用于脏标记比较（不使用 JSON，避免 NaN -> null 的歧义）
+    function rangesKey(ranges) {
+        if (!ranges) return '';
+        return CLASS_DEFS.map(function (def) {
+            var cls = ranges[def.key] || { lower: ['?', '?', '?'], upper: ['?', '?', '?'] };
+            return def.key + '|' + cls.lower.join(',') + '|' + cls.upper.join(',');
+        }).join(';');
+    }
+
+    function isDirty() {
+        return Boolean(savedRanges) && rangesKey(model) !== rangesKey(savedRanges);
+    }
+
+    function labelFor(key) {
+        var def = CLASS_DEFS.filter(function (item) { return item.key === key; })[0];
+        return def ? def.label : key;
+    }
+
+    function clockNow() {
+        var now = new Date();
+        function pad(n) { return n < 10 ? '0' + n : String(n); }
+        return pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    }
+
+    function formatDateTime(date) {
+        try {
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+            });
+        } catch (error) {
+            return date.toISOString();
+        }
+    }
+
+    function hsvToCss(h, s, v) {
+        if (!isNum(h) || !isNum(s) || !isNum(v)) return '#e6ebf1';
+        var hue = clamp(h, 0, 179) * 2;
+        var sat = clamp(s, 0, 255) / 255;
+        var val = clamp(v, 0, 255) / 255;
+        var c = val * sat;
+        var x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+        var m = val - c;
+        var r = 0, g = 0, b = 0;
+        if (hue < 60) { r = c; g = x; b = 0; }
+        else if (hue < 120) { r = x; g = c; b = 0; }
+        else if (hue < 180) { r = 0; g = c; b = x; }
+        else if (hue < 240) { r = 0; g = x; b = c; }
+        else if (hue < 300) { r = x; g = 0; b = c; }
+        else { r = c; g = 0; b = x; }
+        function toByte(n) { return Math.round((n + m) * 255); }
+        return 'rgb(' + toByte(r) + ', ' + toByte(g) + ', ' + toByte(b) + ')';
+    }
+
+    /* ---------------- 提示与错误 ---------------- */
+    function showToast(message, tone) {
+        var toast = $('toast');
+        if (!toast) return;
+        toast.textContent = message;
+        toast.className = 'toast is-visible' + (tone ? ' toast-' + tone : '');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+            toast.className = 'toast';
+        }, 4200);
+    }
+
+    function showAlert(title, error, kind) {
+        var box = $('alert-box');
+        var list = $('alert-details');
+        $('alert-title').textContent = title;
+        list.replaceChildren();
+        var messages = [];
+        if (error && Array.isArray(error.details) && error.details.length) {
+            messages = error.details.map(function (item) { return String(item); });
+        }
+        if (error && error.message) messages.unshift(String(error.message));
+        if (!messages.length) messages.push('未知错误，请稍后重试。');
+        var fragment = document.createDocumentFragment();
+        messages.forEach(function (text) {
+            var li = document.createElement('li');
+            li.textContent = text;
+            fragment.appendChild(li);
+        });
+        list.appendChild(fragment);
+        box.dataset.kind = kind || '';
+        box.hidden = false;
+    }
+
+    function hideAlert() {
+        $('alert-box').hidden = true;
+        $('alert-box').dataset.kind = '';
+    }
+
+    function clearAlert(kind) {
+        var box = $('alert-box');
+        if (!box || box.hidden) return;
+        if (kind && box.dataset.kind !== kind) return;
+        hideAlert();
+    }
+
+    function reportError(title, error, kind) {
+        showAlert(title, error, kind);
+        showToast(title + '：' + ((error && error.message) ? error.message : '未知错误'), 'error');
+    }
+
+    function setHint(text, tone) {
+        var hint = $('preview-hint');
+        hint.textContent = text;
+        hint.dataset.tone = tone || 'muted';
+    }
+
+    function setSaveNote(text) {
+        $('save-note').textContent = text;
+    }
+
+    /* ---------------- 网络层 ---------------- */
+    async function api(url, options) {
+        var init = Object.assign({ method: 'GET' }, options || {});
+        var headers = { 'Accept': 'application/json' };
+        if (init.body !== undefined && init.body !== null) headers['Content-Type'] = 'application/json';
+        init.headers = headers;
+
+        var response = await fetch(url, init);
+        var text = await response.text();
+        var payload = null;
+        if (text) {
+            try { payload = JSON.parse(text); } catch (error) { payload = null; }
+        }
+        if (!response.ok || !payload || payload.success !== true) {
+            var failure = new Error((payload && payload.error) || ('请求失败（HTTP ' + response.status + '）'));
+            failure.details = (payload && Array.isArray(payload.details)) ? payload.details : [];
+            failure.status = response.status;
+            throw failure;
+        }
+        return payload.data;
+    }
+
+    /* ---------------- 表单渲染 ---------------- */
+    function updateRangeFill(input, min, max) {
+        if (!input) return;
+        var value = Number(input.value);
+        var span = max - min;
+        var percent = span > 0 ? ((value - min) / span) * 100 : 0;
+        input.style.setProperty('--fill', clamp(percent, 0, 100).toFixed(1) + '%');
+    }
+
+    function setRange(id, value, min, max) {
+        var el = $(id);
+        if (!el) return;
+        el.min = String(min);
+        el.max = String(max);
+        el.value = String(value);
+        updateRangeFill(el, min, max);
+        el.setAttribute('aria-valuetext', String(value));
+    }
+
+    function setNumber(id, value) {
+        var el = $(id);
+        if (!el) return;
+        el.value = isNum(value) ? String(value) : '';
+    }
+
+    function paintModel() {
+        CLASS_DEFS.forEach(function (def) {
+            ['lower', 'upper'].forEach(function (bound) {
+                ['H', 'S', 'V'].forEach(function (ch) {
+                    var pair = channelBounds(ch);
+                    var index = CH_INDEX[ch];
+                    var value = model[def.key][bound][index];
+                    setRange('rng-' + def.key + '-' + bound + '-' + ch, isNum(value) ? clamp(value, pair[0], pair[1]) : pair[0], pair[0], pair[1]);
+                    setNumber('num-' + def.key + '-' + bound + '-' + ch, value);
+                });
+            });
+        });
+    }
+
+    function applyBoundsToControls() {
+        ['H', 'S', 'V'].forEach(function (ch) {
+            var pair = channelBounds(ch);
+            document.querySelectorAll('[data-bounds-hint="' + ch + '"]').forEach(function (el) {
+                el.textContent = pair[0] + '–' + pair[1];
+            });
+        });
+        document.querySelectorAll('.ctrl input[data-ch]').forEach(function (el) {
+            var pair = channelBounds(el.dataset.ch);
+            el.min = String(pair[0]);
+            el.max = String(pair[1]);
+        });
+    }
+
+    function refreshBands() {
+        document.querySelectorAll('.band').forEach(function (band) {
+            var cls = band.dataset.bandClass;
+            var ch = band.dataset.bandCh;
+            var pair = channelBounds(ch);
+            var index = CH_INDEX[ch];
+            var windowEl = band.querySelector('.band-window');
+            var valueEl = document.querySelector('[data-band-range="' + cls + '-' + ch + '"]');
+            var lo = model[cls] ? model[cls].lower[index] : NaN;
+            var hi = model[cls] ? model[cls].upper[index] : NaN;
+            var valid = isNum(lo) && isNum(hi) && lo >= pair[0] && hi <= pair[1] && lo <= hi;
+            if (windowEl) {
+                windowEl.hidden = !valid;
+                if (valid) {
+                    var leftPct = ((lo - pair[0]) / (pair[1] - pair[0])) * 100;
+                    var rightPct = ((hi - pair[0]) / (pair[1] - pair[0])) * 100;
+                    windowEl.style.left = clamp(leftPct, 0, 100) + '%';
+                    windowEl.style.width = clamp(rightPct - leftPct, 0.8, 100) + '%';
+                }
+            }
+            if (valueEl) valueEl.textContent = valid ? (lo + '–' + hi) : '—';
+        });
+
+        CLASS_DEFS.forEach(function (def) {
+            var container = document.querySelector('[data-bands-for="' + def.key + '"]');
+            if (container && model[def.key]) {
+                var hue = model[def.key].lower[0];
+                container.style.setProperty('--bh', ((isNum(hue) ? clamp(hue, 0, 179) : 0) * 2) + 'deg');
+            }
+            ['lower', 'upper'].forEach(function (bound) {
+                var chip = document.querySelector('[data-corner="' + def.key + '-' + bound + '"]');
+                if (!chip || !model[def.key]) return;
+                var values = model[def.key][bound];
+                chip.style.background = hsvToCss(values[0], values[1], values[2]);
+                chip.title = def.label + ' ' + BOUND_CN[bound] + '色：H ' + values[0] + ' / S ' + values[1] + ' / V ' + values[2];
+            });
+        });
+    }
+
+    /* ---------------- 校验 ---------------- */
+    function validateModel() {
+        var errors = [];
+        CLASS_DEFS.forEach(function (def) {
+            var cls = model[def.key];
+            ['lower', 'upper'].forEach(function (bound) {
+                ['H', 'S', 'V'].forEach(function (ch) {
+                    var pair = channelBounds(ch);
+                    var value = cls[bound][CH_INDEX[ch]];
+                    if (!isNum(value) || Math.floor(value) !== value || value < pair[0] || value > pair[1]) {
+                        errors.push({
+                            id: 'num-' + def.key + '-' + bound + '-' + ch,
+                            message: def.label + ' · ' + ch + ' ' + BOUND_CN[bound] + ' 需为 ' + pair[0] + '–' + pair[1] + ' 的整数'
+                        });
+                    }
+                });
+            });
+            ['H', 'S', 'V'].forEach(function (ch) {
+                var index = CH_INDEX[ch];
+                var lo = cls.lower[index];
+                var hi = cls.upper[index];
+                if (isNum(lo) && isNum(hi) && lo > hi) {
+                    errors.push({
+                        id: 'num-' + def.key + '-lower-' + ch,
+                        message: def.label + ' · ' + ch + ' 下限（' + lo + '）不能大于上限（' + hi + '）'
+                    });
+                }
+            });
+        });
+        return errors;
+    }
+
+    function updateValidation() {
+        var errors = validateModel();
+        document.querySelectorAll('.num.is-invalid').forEach(function (el) {
+            el.classList.remove('is-invalid');
+            el.removeAttribute('aria-invalid');
+        });
+        var summary = $('validation-summary');
+        var list = $('validation-list');
+        if (!errors.length) {
+            summary.hidden = true;
+            list.replaceChildren();
+        } else {
+            summary.hidden = false;
+            $('validation-title').textContent = '有 ' + errors.length + ' 项需要修正，修正后才能保存';
+            var fragment = document.createDocumentFragment();
+            errors.forEach(function (error) {
+                var li = document.createElement('li');
+                li.textContent = error.message;
+                fragment.appendChild(li);
+                var input = $(error.id);
+                if (input) {
+                    input.classList.add('is-invalid');
+                    input.setAttribute('aria-invalid', 'true');
+                }
+            });
+            list.replaceChildren(fragment);
+        }
+        return errors;
+    }
+
+    function focusFirstInvalid() {
+        var target = document.querySelector('.num.is-invalid');
+        if (!target) return;
+        target.focus();
+        if (typeof target.select === 'function') target.select();
+    }
+
+    /* ---------------- 元信息（来源 / 时间 / 脏标记） ---------------- */
+    function renderMetaChips() {
+        var chip = $('source-chip');
+        chip.dataset.source = effectiveSource;
+        $('source-chip-text').textContent = effectiveSource === 'db' ? '生效来源：数据库' : '生效来源：内置默认值';
+        var timeEl = $('updated-at');
+        if (!updatedAt) {
+            timeEl.textContent = '—';
+            timeEl.title = effectiveSource === 'db' ? '' : '尚未保存过自定义阈值，当前使用内置默认值';
+            return;
+        }
+        var date = new Date(updatedAt);
+        if (isNaN(date.getTime())) {
+            timeEl.textContent = String(updatedAt);
+            timeEl.title = String(updatedAt);
+        } else {
+            timeEl.textContent = formatDateTime(date);
+            timeEl.title = String(updatedAt);
+        }
+    }
+
+    function updateDirty() {
+        var dirty = isDirty();
+        $('dirty-badge').hidden = !dirty;
+    }
+
+    function syncSaveButton(errors) {
+        var list = errors || validateModel();
+        var saveBtn = $('btn-save');
+        var dirty = isDirty();
+        // 没有未保存的修改时保存按钮保持禁用（首屏回填真实阈值后即为该状态）。
+        saveBtn.disabled = saving || !stateLoaded || list.length > 0 || !dirty;
+        saveBtn.classList.toggle('is-armed', dirty && saveBtn.disabled === false);
+        if (!stateLoaded) saveBtn.title = '正在读取服务器中的阈值配置…';
+        else if (list.length) saveBtn.title = '请先修正阈值校验错误';
+        else if (!dirty) saveBtn.title = '当前没有未保存的修改';
+        else saveBtn.title = '写入 PostgreSQL 并立即生效（Ctrl / ⌘ + S）';
+
+        var resetBtn = $('btn-reset');
+        if (resetBtn) resetBtn.disabled = !stateLoaded || saving;
+
+        var defaultsBtn = $('btn-load-defaults');
+        if (defaultsBtn) defaultsBtn.disabled = !defaultsRanges || saving;
+        document.querySelectorAll('[data-action="load-defaults"]').forEach(function (el) {
+            el.disabled = !defaultsRanges || saving;
+        });
+    }
+
+    function afterFormChange() {
+        refreshBands();
+        var errors = updateValidation();
+        updateDirty();
+        syncSaveButton(errors);
+        schedulePreview();
+    }
+
+    /* ---------------- 状态读取/应用 ---------------- */
+    function applyState(data) {
+        if (!data || typeof data !== 'object') return false;
+        defaultsRanges = normalizeRanges(data.defaults || data.ranges);
+        savedRanges = normalizeRanges(data.ranges || data.defaults, defaultsRanges);
+
+        if (data.bounds && typeof data.bounds === 'object') {
+            ['H', 'S', 'V'].forEach(function (ch) {
+                var pair = data.bounds[ch];
+                if (Array.isArray(pair) && pair.length === 2 && pair.every(function (v) { return isFinite(Number(v)); })) {
+                    bounds[ch] = [Number(pair[0]), Number(pair[1])];
+                }
+            });
+        }
+
+        effectiveSource = data.source === 'db' ? 'db' : 'default';
+        updatedAt = data.updated_at || null;
+
+        if (Array.isArray(data.classes)) {
+            var extra = data.classes.filter(function (key) {
+                return !CLASS_DEFS.some(function (def) { return def.key === key; });
+            });
+            // 契约只包含 CLOUD / BLUE_WATER；若后端扩展了类别，本页不会渲染它们。
+            if (extra.length) console.warn('[color_thresholds] 服务端返回了本页未渲染的类别：', extra);
+        }
+
+        renderMetaChips();
+        return true;
+    }
+
+    function adoptState(data, paintForm) {
+        if (!applyState(data)) return false;
+        stateLoaded = true;
+        applyBoundsToControls();
+        // 关键：applyState 只更新了 savedRanges / defaultsRanges / bounds / 元信息，
+        // 必须把「真实基准」复制进表单模型后再绘制，否则滑块会停在空模型的 0 上，
+        // 既会误显示 dirty，也可能把 0 阈值保存进数据库。
+        // 若用户真实基准尚未填充过（页面打开后、GET 返回前就拖了滑块），
+        // 这里也强制用基准覆盖，避免把半套 0 值留在表单里被保存。
+        if (paintForm || !baselineApplied) {
+            model = normalizeRanges(savedRanges, defaultsRanges);
+            paintModel();
+        }
+        baselineApplied = true;
+        refreshBands();
+        var errors = updateValidation();
+        updateDirty();
+        syncSaveButton(errors);
+        return true;
+    }
+
+    async function loadState() {
+        try {
+            var data = await api(API_STATE);
+            adoptState(data, !touched);
+            if (previewRequested) requestPreview();   // 若用户已抢先触发预览，状态就绪后用新值重跑
+            return true;
+        } catch (error) {
+            // 若服务端已在模板里注入快照，仍把它当作基准继续；否则保存按钮保持禁用。
+            if (savedRanges) {
+                stateLoaded = true;
+                if (!baselineApplied) {
+                    // 兜底：确保表单拿到基准值，绝不把空模型当成当前阈值。
+                    model = normalizeRanges(savedRanges, defaultsRanges);
+                    paintModel();
+                    baselineApplied = true;
+                    refreshBands();
+                    updateValidation();
+                }
+                updateDirty();
+                syncSaveButton();
+            }
+            reportError('无法读取当前阈值配置', error, 'state');
+            return false;
+        }
+    }
+
+    /* ---------------- 预览源 ---------------- */
+    function selectedKind() {
+        var select = $('source-select');
+        var option = select.options[select.selectedIndex];
+        return option ? (option.dataset.kind || '') : '';
+    }
+
+    function selectedLabel() {
+        var select = $('source-select');
+        var option = select.options[select.selectedIndex];
+        return (option && option.value) ? option.textContent : '';
+    }
+
+    function renderSources(sources, defaultId) {
+        var select = $('source-select');
+        var groups = [
+            { kind: 'analysis', label: '分析结果', items: sources.filter(function (item) { return item.kind !== 'test'; }) },
+            { kind: 'test', label: '测试图片', items: sources.filter(function (item) { return item.kind === 'test'; }) }
+        ];
+        var fragment = document.createDocumentFragment();
+        var firstId = '';
+
+        groups.forEach(function (group) {
+            if (!group.items.length) return;
+            var optgroup = document.createElement('optgroup');
+            optgroup.label = group.label;
+            group.items.forEach(function (item) {
+                var id = (item.id === null || item.id === undefined) ? '' : String(item.id);
+                if (!id) return;
+                if (!firstId) firstId = id;
+                var option = document.createElement('option');
+                option.value = id;
+                option.textContent = (item.label === null || item.label === undefined) ? id : String(item.label);
+                option.dataset.kind = group.kind;
+                optgroup.appendChild(option);
+            });
+            if (optgroup.children.length) fragment.appendChild(optgroup);
+        });
+
+        if (!firstId) {
+            var empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '没有可用的预览源';
+            fragment.appendChild(empty);
+        }
+        select.replaceChildren(fragment);
+
+        var wanted = (defaultId !== null && defaultId !== undefined && String(defaultId)) ? String(defaultId) : firstId;
+        if (wanted) {
+            Array.from(select.options).forEach(function (option) {
+                if (option.value === wanted) option.selected = true;
+            });
+        }
+
+        currentSource = select.value || '';
+        sourceKind = selectedKind();
+        $('btn-rerun').disabled = !currentSource;
+        if (!currentSource) setHint('没有可用的预览源，无法生成预览', 'warn');
+    }
+
+    async function loadSources() {
+        var select = $('source-select');
+        select.disabled = true;
+        try {
+            var data = await api(API_SOURCES);
+            var sources = (data && Array.isArray(data.sources)) ? data.sources : [];
+            renderSources(sources, data ? data.default : null);
+            select.disabled = false;
+            clearAlert('sources');
+            return true;
+        } catch (error) {
+            var option = document.createElement('option');
+            option.value = '';
+            option.textContent = '预览源读取失败';
+            select.replaceChildren(option);
+            select.disabled = true;
+            currentSource = '';
+            sourceKind = '';
+            $('btn-rerun').disabled = true;
+            setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
+            reportError('无法读取预览源列表', error, 'sources');
+            return false;
+        }
+    }
+
+    async function refreshSources() {
+        var button = $('btn-refresh-sources');
+        button.disabled = true;
+        try {
+            var ok = await loadSources();
+            if (ok && currentSource) requestPreview();
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    /* ---------------- 预览 ---------------- */
+    function setPreviewLoading(loading) {
+        var preview = $('preview');
+        preview.setAttribute('aria-busy', loading ? 'true' : 'false');
+        ['frame-source', 'frame-classification'].forEach(function (id) {
+            var frame = $(id);
+            if (!frame) return;
+            frame.classList.toggle('is-loading', loading);
+            if (loading) frame.classList.remove('is-error');
+        });
+    }
+
+    function setVeilText(text) {
+        document.querySelectorAll('.veil-text').forEach(function (el) {
+            el.textContent = text;
+        });
+    }
+
+    function setFrameImage(which, src) {
+        var img = $(which === 'source' ? 'img-source' : 'img-classification');
+        var frame = $(which === 'source' ? 'frame-source' : 'frame-classification');
+        if (!img || !frame) return;
+        img.onload = function () {
+            frame.dataset.loaded = '1';
+            frame.classList.remove('is-empty', 'is-error');
+            frame.classList.add('is-loaded');
+        };
+        img.onerror = function () {
+            frame.classList.remove('is-loading');
+            if (frame.dataset.loaded === '1') {
+                showToast('其中一张预览图解码失败，可点击「重跑当前预览」重试', 'error');
+                return;
+            }
+            frame.classList.add('is-error');
+        };
+        var emptyText = frame.querySelector('.frame-empty');
+        if (emptyText) emptyText.textContent = '正在载入图像…';
+        img.src = src;
+    }
+
+    function setText(id, text) {
+        var el = $(id);
+        if (el) el.textContent = text;
+    }
+
+    function setBar(id, ratio) {
+        var el = $(id);
+        if (!el) return;
+        var percent = (isNum(ratio) && isFinite(ratio)) ? clamp(ratio * 100, 0, 100) : 0;
+        el.style.width = percent.toFixed(1) + '%';
+    }
+
+    function renderMetrics(metrics) {
+        var m = metrics || {};
+        function percent(value) { return isNum(value) ? (value * 100).toFixed(2) + '%' : '—'; }
+        function count(value) { return isNum(value) ? Math.round(value).toLocaleString('zh-CN') : '—'; }
+
+        setText('m-cloud', percent(m.cloudCoverage));
+        setBar('bar-cloud', m.cloudCoverage);
+        setText('m-sea', percent(m.seaBlueness));
+        setBar('bar-sea', m.seaBlueness);
+        setText('m-index', percent(m.bluenessIndex));
+        setBar('bar-index', m.bluenessIndex);
+        setText('m-visibility', isNum(m.visibilityKm) ? m.visibilityKm.toFixed(2) + ' km' : '—');
+        setText('m-visibility-level', m.visibilityLevel ? '等级：' + m.visibilityLevel : '等级：—');
+        setText('m-blue', count(m.bluePixels));
+        setText('m-blue-pct', '占比 ' + percent(m.bluePercentage));
+        setText('m-yellow', count(m.yellowPixels));
+        setText('m-yellow-pct', '占比 ' + percent(m.yellowPercentage));
+        setText('m-cloud-px', count(m.cloudPixels));
+        setText('m-ocean', count(m.totalOceanPixels));
+        $('metrics').classList.remove('is-empty');
+    }
+
+    function applyPreview(data) {
+        if (!data) return;
+        if (data.image && data.image.source_preview) setFrameImage('source', data.image.source_preview);
+        if (data.image && data.image.classification) setFrameImage('classification', data.image.classification);
+
+        var width = data.width;
+        var height = data.height;
+        var dims = $('dims-badge');
+        if (isNum(width) && isNum(height)) {
+            dims.hidden = false;
+            dims.textContent = Math.round(width) + ' × ' + Math.round(height) + ' px';
+            dims.title = '预览图实际像素尺寸';
+        }
+
+        var status = data.metrics ? data.metrics.status : null;
+        var statusBadge = $('status-badge');
+        if (status) {
+            statusBadge.hidden = false;
+            statusBadge.textContent = '状态：' + (status === 'completed' ? '完成' : (status === 'cloudy' ? '多云' : status));
+            statusBadge.dataset.status = status;
+        } else {
+            statusBadge.hidden = true;
+        }
+
+        renderMetrics(data.metrics);
+
+        var latency = $('latency-badge');
+        if (isNum(data.elapsedMs)) {
+            latency.hidden = false;
+            latency.textContent = Math.round(data.elapsedMs) + ' ms';
+            latency.title = '服务端处理耗时';
+        }
+
+        var sourceLabel = selectedLabel();
+        setHint('预览已更新' + (sourceLabel ? ' · ' + sourceLabel : ''), 'ok');
+        clearAlert('preview');
+    }
+
+    function setPreviewError(error) {
+        reportError('预览生成失败', error, 'preview');
+        setHint('预览生成失败：' + ((error && error.message) ? error.message : '未知错误') + '，可点击「重跑当前预览」重试。', 'error');
+        ['frame-source', 'frame-classification'].forEach(function (id) {
+            var frame = $(id);
+            if (frame && frame.dataset.loaded !== '1') frame.classList.add('is-error');
+        });
+        $('latency-badge').hidden = true;
+    }
+
+    function apiRanges() {
+        var result = {};
+        CLASS_DEFS.forEach(function (def) {
+            result[def.key] = {
+                lower: model[def.key].lower.slice(),
+                upper: model[def.key].upper.slice()
+            };
+        });
+        return result;
+    }
+
+    async function requestPreview() {
+        if (!currentSource) {
+            setHint('没有可用的预览源，无法生成预览', 'warn');
+            return;
+        }
+
+        // 约定：阈值不合法时直接跳过预览请求（服务端会返回 400 且计算无意义），
+        // 保留上一次有效预览并给出警告；修正后下一次 change 会自动恢复。
+        var useSavedConfig = firstPreview;
+        if (!useSavedConfig && validateModel().length) {
+            setHint('阈值不合法，已暂停实时预览；修正后会自动恢复。', 'warn');
+            return;
+        }
+
+        var requestSeq = ++seq;
+        if (inflight) {
+            try { inflight.abort(); } catch (error) { /* 忽略已结束的请求 */ }
+        }
+        var controller = new AbortController();
+        inflight = controller;
+        if (!useSavedConfig) previewRequested = true;
+        firstPreview = false;
+
+        var isTestSource = sourceKind === 'test';
+        setVeilText(isTestSource ? '首次加载会进行高清化，请稍候…' : '正在生成预览…');
+        setPreviewLoading(true);
+        setHint(isTestSource ? '测试图片首次加载会进行高清化（Real-ESRGAN），请稍候…' : '正在生成预览…', 'busy');
+        $('btn-rerun').disabled = true;
+
+        var payload = {
+            source: currentSource,
+            ranges: useSavedConfig ? null : apiRanges()
+        };
+
+        try {
+            var data = await api(API_PREVIEW, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            if (requestSeq !== seq) return;  // 已有更新的请求，丢弃过期响应
+            applyPreview(data);
+        } catch (error) {
+            if (error && error.name === 'AbortError') return;
+            if (requestSeq !== seq) return;
+            setPreviewError(error);
+        } finally {
+            if (requestSeq === seq) {
+                setPreviewLoading(false);
+                inflight = null;
+                $('btn-rerun').disabled = !currentSource;
+            }
+        }
+    }
+
+    function schedulePreview() {
+        if (debounceId) clearTimeout(debounceId);
+        debounceId = setTimeout(function () {
+            debounceId = null;
+            requestPreview();
+        }, DEBOUNCE_MS);
+    }
+
+    /* ---------------- 表单交互 ---------------- */
+    function handleControlInput(el) {
+        var cls = el.dataset.class;
+        var bound = el.dataset.bound;
+        var ch = el.dataset.ch;
+        var role = el.dataset.role;
+        if (!cls || !bound || !ch || !model[cls]) return;
+
+        var index = CH_INDEX[ch];
+        var pair = channelBounds(ch);
+
+        if (role === 'range') {
+            var value = Number(el.value);
+            if (!isFinite(value)) return;
+            model[cls][bound][index] = value;
+            var partner = $('num-' + cls + '-' + bound + '-' + ch);
+            if (partner) partner.value = String(value);
+            updateRangeFill(el, pair[0], pair[1]);
+        } else if (role === 'num') {
+            var raw = el.value.trim();
+            var parsed = raw === '' ? NaN : Number(raw);
+            var integer = (isFinite(parsed) && Math.floor(parsed) === parsed) ? parsed : NaN;
+            model[cls][bound][index] = integer;
+            var range = $('rng-' + cls + '-' + bound + '-' + ch);
+            if (range && isNum(integer)) {
+                range.value = String(clamp(integer, pair[0], pair[1]));
+                updateRangeFill(range, pair[0], pair[1]);
+            }
+        }
+        touched = true;
+        afterFormChange();
+    }
+
+    function loadDefaults(className) {
+        if (!defaultsRanges) {
+            showToast('内置默认值尚未加载', 'error');
+            return;
+        }
+        var targets = className ? CLASS_DEFS.filter(function (def) { return def.key === className; }) : CLASS_DEFS;
+        if (!targets.length) return;
+        var missing = targets.filter(function (def) { return !defaultsRanges[def.key]; });
+        if (missing.length) {
+            showToast('内置默认值不完整，无法载入', 'error');
+            return;
+        }
+        targets.forEach(function (def) {
+            model[def.key] = {
+                lower: defaultsRanges[def.key].lower.slice(),
+                upper: defaultsRanges[def.key].upper.slice()
+            };
+        });
+        touched = true;
+        paintModel();
+        refreshBands();
+        var errors = updateValidation();
+        updateDirty();
+        syncSaveButton(errors);
+        schedulePreview();
+        showToast('已载入' + (className ? '「' + labelFor(className) + '」' : '全部类别') + '的内置默认值（尚未保存）', 'info');
+    }
+
+    function setSaving(on) {
+        saving = on;
+        var button = $('btn-save');
+        button.textContent = on ? '保存中…' : '保存并立即生效';
+        button.setAttribute('aria-busy', on ? 'true' : 'false');
+        syncSaveButton();
+    }
+
+    async function save() {
+        var errors = updateValidation();
+        syncSaveButton(errors);
+        if (!stateLoaded) {
+            showToast('服务器中的阈值配置尚未就绪，暂时无法保存', 'error');
+            return;
+        }
+        if (errors.length) {
+            focusFirstInvalid();
+            showToast('阈值不合法，请先修正 ' + errors.length + ' 项', 'error');
+            return;
+        }
+        if (!isDirty()) {
+            showToast('没有需要保存的修改', 'info');
+            return;
+        }
+
+        var sentKey = rangesKey(model);
+        setSaving(true);
+        try {
+            var data = await api(API_STATE, {
+                method: 'POST',
+                body: JSON.stringify({ ranges: apiRanges() })
+            });
+            var keepLocalEdits = rangesKey(model) !== sentKey;
+            adoptState(data, !keepLocalEdits);
+            clearAlert('save');
+            setSaveNote('已保存 · ' + clockNow());
+            showToast('已保存，下一次分析立即使用新阈值', 'ok');
+        } catch (error) {
+            reportError('保存失败', error, 'save');
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function resetToDefaults() {
+        if (!stateLoaded) {
+            showToast('服务器中的阈值配置尚未就绪，暂时无法恢复默认', 'error');
+            return;
+        }
+        if (!window.confirm('确定恢复内置默认阈值？这会立即覆盖数据库中的当前配置，下一次分析将使用内置默认值。')) return;
+
+        var button = $('btn-reset');
+        button.disabled = true;
+        try {
+            var data = await api(API_RESET, { method: 'POST' });
+            adoptState(data, true);
+            clearAlert('reset');
+            setSaveNote('已恢复内置默认 · ' + clockNow());
+            showToast('已恢复内置默认阈值，已立即生效', 'ok');
+            firstPreview = false;
+            requestPreview();
+        } catch (error) {
+            reportError('恢复默认值失败', error, 'reset');
+        } finally {
+            button.disabled = !stateLoaded;
+        }
+    }
+
+    /* ---------------- 事件绑定 ---------------- */
+    function bindEvents() {
+        var controls = $('controls');
+        controls.addEventListener('input', function (event) {
+            var target = event.target;
+            if (!(target instanceof HTMLInputElement)) return;
+            if (!target.dataset.role) return;
+            handleControlInput(target);
+        });
+        // 数字输入框失焦时把 0 以上的空值视为未完成输入；这里仅在控件之间做轻量规范化，
+        // 真正的合法性判断仍交给 validateModel，避免静默改写用户输入。
+        controls.addEventListener('change', function (event) {
+            var target = event.target;
+            if (target instanceof HTMLInputElement && target.dataset.role === 'num') {
+                target.value = target.value.trim();
+            }
+        });
+
+        $('btn-save').addEventListener('click', function () { void save(); });
+        $('btn-reset').addEventListener('click', function () { void resetToDefaults(); });
+        $('btn-rerun').addEventListener('click', function () { void requestPreview(); });
+        $('btn-refresh-sources').addEventListener('click', function () { void refreshSources(); });
+        $('btn-load-defaults').addEventListener('click', function () { loadDefaults(null); });
+        $('alert-close').addEventListener('click', hideAlert);
+        document.querySelectorAll('[data-action="load-defaults"]').forEach(function (button) {
+            button.addEventListener('click', function () { loadDefaults(button.dataset.class); });
+        });
+
+        $('source-select').addEventListener('change', function () {
+            currentSource = $('source-select').value;
+            sourceKind = selectedKind();
+            firstPreview = false;   // 用户已明确选择预览源，按当前表单值渲染
+            requestPreview();
+        });
+
+        document.addEventListener('keydown', function (event) {
+            var modifier = event.ctrlKey || event.metaKey;
+            if (modifier && (event.key === 's' || event.key === 'S')) {
+                event.preventDefault();
+                if (!saving) void save();
+                return;
+            }
+            if (event.key === 'Escape' && !$('alert-box').hidden) hideAlert();
+        });
+
+        // 兜底：任何漏网的 Promise 拒绝都会以 toast 呈现，页面不会静默卡住
+        window.addEventListener('unhandledrejection', function (event) {
+            console.error('[color_thresholds] 未处理的 Promise 拒绝：', event.reason);
+            showToast('页面发生未预期的错误，建议刷新后重试', 'error');
+            event.preventDefault();
+        });
+    }
+
+    /* ---------------- 启动 ---------------- */
+    async function loadInitial() {
+        setHint('正在读取阈值配置与预览源…', 'busy');
+        var results = await Promise.all([loadState(), loadSources()]);
+        var sourcesOk = results[1];
+        if (sourcesOk && currentSource) {
+            await requestPreview();
+        } else if (!sourcesOk) {
+            setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
+        } else {
+            setHint('没有可用的预览源，无法生成预览', 'warn');
+        }
+    }
+
+    function init() {
+        bindEvents();
+
+        if (BOOTSTRAP && BOOTSTRAP.ranges) {
+            // 服务端已注入快照：先渲染首屏；即使随后 GET 失败也能保存这份基准。
+            adoptState(BOOTSTRAP, true);
+            stateLoaded = true;
+            updateDirty();
+            syncSaveButton();
+        } else {
+            paintModel();
+            applyBoundsToControls();
+            var errors = updateValidation();
+            updateDirty();
+            syncSaveButton(errors);
+        }
+
+        void loadInitial();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
+</body>
+</html>

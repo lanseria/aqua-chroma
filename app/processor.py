@@ -10,7 +10,7 @@ import numpy as np
 import cv2
 from PIL import Image, ImageDraw # 导入Image、ImageDraw模块
 
-from . import config, geo_utils
+from . import config, geo_utils, settings_store
 
 def is_night(timestamp: int) -> bool:
     """
@@ -263,14 +263,22 @@ def _append_legend(image_rgb: np.ndarray) -> np.ndarray:
     return np.array(canvas)
 
 
-def _render_classification_map(hsv_image: np.ndarray, class_masks: Dict[str, np.ndarray],
-                               output_path: str, cloud_v_low: float) -> np.ndarray:
+def render_classification_map(hsv_image: np.ndarray, class_masks: Dict[str, np.ndarray],
+                              output_path: Optional[str] = None,
+                              cloud_v_low: Optional[float] = None) -> np.ndarray:
     """
     绘制 HSV 分类结果图：先按类别取色，再在类别内部按深浅坐标取不同色阶。
 
     class_masks 决定像素归属（与原判定逻辑完全一致），着色只发生在已归类像素上，
     不会改变任何像素的分类结果或指标统计口径。
+
+    - output_path 为 None 时只返回 RGB 数组、不写任何文件（供实时预览复用同一套着色逻辑）；
+    - cloud_v_low 为云类别判定阈值的 V 下界（决定云层色阶起点），
+      为 None 时取当前生效阈值（settings_store）。
     """
+    if cloud_v_low is None:
+        cloud_v_low = settings_store.get_hsv_ranges()["CLOUD"]["lower"][2]
+
     render_cfg = config.HSV_CLASSIFICATION_RENDER
     mode = str(render_cfg.get("mode", "levels")).lower()
     water_range = render_cfg.get("water_value_range", [20, 140])
@@ -287,87 +295,91 @@ def _render_classification_map(hsv_image: np.ndarray, class_masks: Dict[str, np.
 
     if render_cfg.get("legend", True):
         output = _append_legend(output)
-    Image.fromarray(output).save(output_path)
+
+    if output_path:
+        Image.fromarray(output).save(output_path)
     return output
 
 
-def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
+def classify_hsv(hsv_image: np.ndarray, ocean_mask: np.ndarray,
+                 ranges: Dict[str, Any]) -> Dict[str, np.ndarray]:
     """
-    使用基于 HSV 颜色范围的阈值法对海洋图像进行分类和分析。
-    分类判定（云 / 海蓝 / 海黄）保持不变；分类结果图 04_hsv_classification.png
-    在类别内部按像素明度分出深浅色阶（见 config.HSV_CLASSIFICATION_RENDER），
-    仅影响可视化，不改变指标口径。
-    新增: hsv_ranges_override 参数，用于接收临时的HSV阈值。
+    按 HSV 阈值把海洋像素分为 云 / 蓝水 / 黄水 三类。
+
+    优先级与生产口径完全一致：
+    1. 先判断是否为云（必须同时在海洋区域内）；
+    2. 在非云像素中判断是否为蓝水；
+    3. 海洋区域内其余非云、非蓝水像素统称黄水。
+
+    Returns:
+        {"CLOUD": mask, "BLUE_WATER": mask, "YELLOW_WATER": mask}，均为 uint8 0/255 掩码。
     """
-    total_ocean_pixels = np.count_nonzero(ocean_mask)
-    if total_ocean_pixels == 0:
-        # 即使没有海洋像素，也写出一张全黑分类图（附图例），保证输出目录的产物文件齐全
-        blank = np.zeros_like(image_array, dtype=np.uint8)
-        if config.HSV_CLASSIFICATION_RENDER.get("legend", True):
-            blank = _append_legend(blank)
-        Image.fromarray(blank).save(
-            os.path.join(output_dir, "04_hsv_classification.png")
-        )
-        return {"status": "无数据", "seaBlueness": None, "cloudCoverage": None, "bluenessIndex": None, "bluePercentage": None, "yellowPercentage": None}
-
-    # --- 1. 转换到 HSV 颜色空间 ---
-    hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
-
-    # --- 2. 根据配置定义 HSV 范围 ---
-    # 优先使用传入的 hsv_ranges_override，否则回退到 config 文件中的默认值
-    ranges = hsv_ranges_override if hsv_ranges_override is not None else config.COLOR_CLASSIFICATION_HSV_RANGES
-    print(f"--- [Processor] Using HSV Ranges: {ranges} ---")
-    
     cloud_lower = np.array(ranges["CLOUD"]["lower"])
     cloud_upper = np.array(ranges["CLOUD"]["upper"])
     blue_lower = np.array(ranges["BLUE_WATER"]["lower"])
     blue_upper = np.array(ranges["BLUE_WATER"]["upper"])
-    
-    # --- 3. 像素分类 ---
-    # 规则应用有优先级：首先判断是不是云，然后在非云像素中判断是不是蓝水。
-    
-    # 3.1 识别所有符合“云”颜色范围的像素
+
+    # 1. 识别所有符合“云”颜色范围的像素
     cloud_mask_hsv = cv2.inRange(hsv_image, cloud_lower, cloud_upper)
     # 最终的云像素必须同时在海洋区域内和HSV颜色范围内
     final_cloud_mask = cv2.bitwise_and(cloud_mask_hsv, cloud_mask_hsv, mask=ocean_mask)
 
-    # 3.2 识别所有符合“蓝水”颜色范围的像素
+    # 2. 识别所有符合“蓝水”颜色范围的像素
     blue_mask_hsv = cv2.inRange(hsv_image, blue_lower, blue_upper)
     # 最终的蓝水像素必须在海洋区域内、在HSV颜色范围内，且【不是】云
     non_cloud_mask = cv2.bitwise_not(final_cloud_mask)
     final_blue_mask = cv2.bitwise_and(blue_mask_hsv, blue_mask_hsv, mask=non_cloud_mask)
     final_blue_mask = cv2.bitwise_and(final_blue_mask, final_blue_mask, mask=ocean_mask) # 再次确认在海洋区
 
-    # 3.3 “黄水”是海洋区域内所有非云、非蓝水的像素
+    # 3. “黄水”是海洋区域内所有非云、非蓝水的像素
     non_cloud_blue_mask = cv2.bitwise_not(cv2.bitwise_or(final_cloud_mask, final_blue_mask))
     final_yellow_mask = cv2.bitwise_and(ocean_mask, non_cloud_blue_mask)
 
-    # --- 4. 统计各类像素数量 ---
+    return {
+        "CLOUD": final_cloud_mask,
+        "BLUE_WATER": final_blue_mask,
+        "YELLOW_WATER": final_yellow_mask,
+    }
+
+
+def compute_ocean_color_metrics(image_array: np.ndarray, ocean_mask: np.ndarray,
+                                class_masks: Dict[str, np.ndarray],
+                                output_dir: Optional[str] = None,
+                                verbose: bool = True) -> Dict[str, Any]:
+    """
+    基于分类掩码计算海蓝程度/云量/能见度等指标。
+
+    生产分析（analyze_ocean_color）与实时预览（threshold_preview）共用本函数，
+    保证两边指标口径完全一致。output_dir 为 None 时不写任何调试图
+    （预览绝不落盘），verbose=False 时省略像素计数日志。
+    """
+    total_ocean_pixels = np.count_nonzero(ocean_mask)
+    if total_ocean_pixels == 0:
+        return {
+            "status": "无数据", "seaBlueness": None, "cloudCoverage": None,
+            "bluenessIndex": None, "bluePercentage": None, "yellowPercentage": None,
+            "visibilityKm": None, "visibilityLevel": "无数据", "hazeScore": None,
+            "darkChannelBrightness": None, "contrastScore": None, "edgeScore": None,
+            "bluePixels": 0, "yellowPixels": 0, "cloudPixels": 0, "totalOceanPixels": 0,
+        }
+
+    # --- 1. 统计各类像素数量 ---
+    final_cloud_mask = class_masks["CLOUD"]
+    final_blue_mask = class_masks["BLUE_WATER"]
+    final_yellow_mask = class_masks["YELLOW_WATER"]
+
     cloud_pixels = np.count_nonzero(final_cloud_mask)
     blue_pixels = np.count_nonzero(final_blue_mask)
     yellow_pixels = np.count_nonzero(final_yellow_mask)
 
-    print("\n--- [Processor] HSV Thresholding Pixel Count ---")
-    print(f"  - Cloud Pixels      : {cloud_pixels}")
-    print(f"  - Blue Water Pixels : {blue_pixels}")
-    print(f"  - Yellow Water Pixels: {yellow_pixels}")
-    print("--------------------------------------------------\n")
+    if verbose:
+        print("\n--- [Processor] HSV Thresholding Pixel Count ---")
+        print(f"  - Cloud Pixels      : {cloud_pixels}")
+        print(f"  - Blue Water Pixels : {blue_pixels}")
+        print(f"  - Yellow Water Pixels: {yellow_pixels}")
+        print("--------------------------------------------------\n")
 
-    # --- 5. 生成并保存分类调试图 ---
-    # 判定结果（掩码）不变，仅着色方式改变：每个类别内部按像素明度细分深浅色阶，
-    # 不再用 3 种纯色平涂。着色与图例参数见 config.HSV_CLASSIFICATION_RENDER。
-    _render_classification_map(
-        hsv_image=hsv_image,
-        class_masks={
-            "CLOUD": final_cloud_mask,
-            "BLUE_WATER": final_blue_mask,
-            "YELLOW_WATER": final_yellow_mask,
-        },
-        output_path=os.path.join(output_dir, "04_hsv_classification.png"),
-        cloud_v_low=cloud_lower[2],
-    )
-
-    # --- 6. 计算各项指标 ---
+    # --- 2. 计算各项指标 ---
     # 口径拆分（metric_version=2）:
     #   seaBlueness = blue / (blue + yellow)，即"可见水体"中蓝色占比，纯水色指标，与云量无关；
     #   cloudCoverage = cloud / total_ocean，大气/云属性；
@@ -387,7 +399,7 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
     # 云量超过阈值时标记为 cloudy，便于查询端区分低质量样本（云主导场景下的水色值不可信）
     status = "cloudy" if cloud_coverage >= config.CLOUD_COVERAGE_THRESHOLD else "completed"
 
-    # --- 7. 能见度估算（无云水面为主测量区；云顶测量按无云占比混入，输出连续过渡）---
+    # --- 3. 能见度估算（无云水面为主测量区；云顶测量按无云占比混入，输出连续过渡）---
     visibility_result = estimate_visibility(
         image_rgb=image_array,
         ocean_mask=ocean_mask,
@@ -413,3 +425,64 @@ def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_
         "cloudPixels": int(cloud_pixels),
         "totalOceanPixels": int(total_ocean_pixels),
     }
+
+
+def analyze_ocean_color(image_array: np.ndarray, ocean_mask: np.ndarray, output_dir: str, hsv_ranges_override: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    使用基于 HSV 颜色范围的阈值法对海洋图像进行分类和分析。
+    分类判定（云 / 海蓝 / 海黄）保持不变；分类结果图 04_hsv_classification.png
+    在类别内部按像素明度分出深浅色阶（见 config.HSV_CLASSIFICATION_RENDER），
+    仅影响可视化，不改变指标口径。
+
+    阈值来源（优先级从高到低）：
+    1. hsv_ranges_override：调试工具传入的临时阈值；
+    2. settings_store 的生效阈值：数据库 app_settings 表（网页 /tools/color_thresholds
+       保存的值）优先，数据库无有效记录时回退 config.DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES。
+       因此页面上调整阈值后，生产分析下一次运行立即使用新值，无需重启。
+    """
+    total_ocean_pixels = np.count_nonzero(ocean_mask)
+    if total_ocean_pixels == 0:
+        # 即使没有海洋像素，也写出一张全黑分类图（附图例），保证输出目录的产物文件齐全
+        blank = np.zeros_like(image_array, dtype=np.uint8)
+        if config.HSV_CLASSIFICATION_RENDER.get("legend", True):
+            blank = _append_legend(blank)
+        Image.fromarray(blank).save(
+            os.path.join(output_dir, "04_hsv_classification.png")
+        )
+        return {"status": "无数据", "seaBlueness": None, "cloudCoverage": None, "bluenessIndex": None, "bluePercentage": None, "yellowPercentage": None}
+
+    # --- 1. 转换到 HSV 颜色空间 ---
+    hsv_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
+
+    # --- 2. 确定本次使用的 HSV 阈值 ---
+    # 优先使用传入的 hsv_ranges_override，否则使用运行时设置（数据库优先，默认值兜底）
+    if hsv_ranges_override is not None:
+        ranges = hsv_ranges_override
+        ranges_source = "override"
+    else:
+        ranges = settings_store.get_hsv_ranges()
+        # 与 get_hsv_ranges 共用同一份缓存，仅用于日志标注阈值来源
+        ranges_source = settings_store.get_state()["source"]
+    print(f"--- [Processor] Using HSV Ranges (source={ranges_source}): {ranges} ---")
+
+    # --- 3. 像素分类（云 > 蓝水 > 黄水 的优先级逻辑见 classify_hsv）---
+    class_masks = classify_hsv(hsv_image, ocean_mask, ranges)
+
+    # --- 4. 生成并保存分类调试图 ---
+    # 判定结果（掩码）不变，仅着色方式改变：每个类别内部按像素明度细分深浅色阶，
+    # 不再用 3 种纯色平涂。着色与图例参数见 config.HSV_CLASSIFICATION_RENDER。
+    render_classification_map(
+        hsv_image=hsv_image,
+        class_masks=class_masks,
+        output_path=os.path.join(output_dir, "04_hsv_classification.png"),
+        cloud_v_low=ranges["CLOUD"]["lower"][2],
+    )
+
+    # --- 5. 计算各项指标（与实时预览共用同一实现）---
+    return compute_ocean_color_metrics(
+        image_array=image_array,
+        ocean_mask=ocean_mask,
+        class_masks=class_masks,
+        output_dir=output_dir,
+        verbose=True,
+    )

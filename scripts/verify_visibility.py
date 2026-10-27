@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 from PIL import Image
 
-from app import geo_utils, processor
+from app import config, geo_utils, processor
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
         # 先估云量：用 processor 的 HSV 云判据快速统计
         import cv2
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        ranges = processor.config.COLOR_CLASSIFICATION_HSV_RANGES
+        ranges = config.DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES
         cloud_mask = cv2.inRange(hsv, np.array(ranges["CLOUD"]["lower"]), np.array(ranges["CLOUD"]["upper"]))
         cloud_ratio = np.count_nonzero(cloud_mask) / (mask.shape[0] * mask.shape[1])
 

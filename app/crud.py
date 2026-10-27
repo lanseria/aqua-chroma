@@ -1,4 +1,6 @@
 # app/crud.py
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 from . import models, schemas
 
@@ -45,3 +47,43 @@ def upsert_analysis_result(db: Session, result_data: schemas.AnalysisResultCreat
     return db_result
 
 # 注意：我们不再需要单独的 create_analysis_result 函数，因为 upsert 已经包含了它的功能。
+
+
+# --- 运行时应用设置（app_settings 表）---
+
+def get_app_setting(db: Session, key: str):
+    """按 key 查询一条运行时设置，不存在时返回 None。"""
+    return db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
+
+
+def upsert_app_setting(db: Session, key: str, value_json: str) -> models.AppSetting:
+    """
+    写入/更新一条运行时设置（value 为 JSON 文本）。
+
+    存在则更新 value 与 updated_at，不存在则插入。提交失败时抛出异常，
+    由调用方（settings_store）转换为对外的明确错误。
+    """
+    row = get_app_setting(db, key)
+    now = datetime.now(timezone.utc)
+    if row:
+        print(f"[CRUD] Updating app setting: {key}")
+        row.value = value_json
+        row.updated_at = now
+    else:
+        print(f"[CRUD] Creating app setting: {key}")
+        row = models.AppSetting(key=key, value=value_json, updated_at=now)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_app_setting(db: Session, key: str) -> bool:
+    """删除一条运行时设置。返回是否确实删除了记录。"""
+    row = get_app_setting(db, key)
+    if row is None:
+        return False
+    print(f"[CRUD] Deleting app setting: {key}")
+    db.delete(row)
+    db.commit()
+    return True
