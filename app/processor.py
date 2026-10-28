@@ -349,7 +349,7 @@ def compute_ocean_color_metrics(image_array: np.ndarray, ocean_mask: np.ndarray,
     """
     基于分类掩码计算海蓝程度/云量/能见度等指标。
 
-    生产分析（analyze_ocean_color）与实时预览（threshold_preview）共用本函数，
+    生产分析（analyze_ocean_color）与阈值实验台预览（color_lab）共用本函数，
     保证两边指标口径完全一致。output_dir 为 None 时不写任何调试图
     （预览绝不落盘），verbose=False 时省略像素计数日志。
     """

@@ -188,18 +188,41 @@ ESRGAN_TORCH_THREADS = int(os.getenv("ESRGAN_TORCH_THREADS", "0")) or torch.get_
 # --- 定义调试图片的基准输出目录 ---
 OUTPUT_BASE_DIR = "data/output"
 
-# --- 颜色阈值实时预览：预览源与 tag 配置 ---
-# 预览源只取 data/output/<timestamp>/ 下的真实分析结果（03_ocean_only.png），
-# 允许给它打一或多个 tag（如 晴朗天空/多云/薄雾），把真实分析结果当作"分类型测试样本"。
-# 下面只是页面上的录入候选建议，实际允许任意不超过长度上限的 tag；
-# 用户打的 tag 持久化在数据库 preview_tags 表，不是写死的配置。
-PREVIEW_TAG_PRESETS = ["晴朗天空", "少云", "多云", "阴天", "薄雾", "浓雾"]
-# 单个 tag 的最大长度（字符数）
-PREVIEW_TAG_MAX_LENGTH = 24
-# 单个时间点最多可打的 tag 数量
-PREVIEW_TAG_MAX_COUNT = 20
-# 预览源接口单次最多返回的时间点数量（按时间倒序；超出时接口返回 truncated=true）
-PREVIEW_SOURCE_MAX_RETURN = 500
+# --- 颜色阈值智能调优实验台（/tools/color_thresholds）---
+# 新流程：导入卫星图片（单张 / 多张 / ZIP 批量）→ 用当前 HSV 阈值自动分类
+# （云层 / 蓝海 / 黄海）→ 用户点击结果图上分错的「色块」指定真实类别 →
+# 后端汇总所有图片的纠正样本，自动搜索更优的 HSV 阈值 → 用户确认后保存即生效。
+# 设计说明见 docs/color-thresholds-lab.md。
+TOOL_UPLOAD_DIR = "data/tool_uploads/color_thresholds"
+# 同时保留的导入图片数量上限（超出时导入接口返回中文错误，需先删除旧图）
+TOOL_UPLOAD_MAX_IMAGES = 60
+# 单次上传请求体上限（单张图片或一个 ZIP 的原始字节数）
+TOOL_UPLOAD_MAX_BYTES = 60 * 1024 * 1024
+# 导入图片等比缩放后的最长边（px）。控制后续色块聚类与实时预览的计算量。
+TOOL_UPLOAD_MAX_SIDE = 1600
+# 允许导入的图片扩展名（ZIP 内条目按扩展名过滤；单文件按能否解码判定）
+TOOL_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+# ZIP 批量导入限制：条目数、解压后总字节数
+TOOL_ZIP_MAX_ENTRIES = 120
+TOOL_ZIP_MAX_TOTAL_BYTES = 300 * 1024 * 1024
+# 色块聚类数（Lab 颜色空间 K-Means），以及色块最小像素数（更小的碎片不单独成块）
+TOOL_BLOCK_COUNT = 14
+TOOL_BLOCK_MIN_PIXELS = 24
+# 色块纠正图例：key 与页面一致；IGNORE 表示排除出分析（陆地/非海域）
+TOOL_CORRECTION_LABELS = (
+    ("CLOUD", "云层"),
+    ("BLUE_WATER", "蓝海"),
+    ("YELLOW_WATER", "黄海"),
+    ("IGNORE", "忽略"),
+)
+# 自动优化：参与优化的最大标注像素数、单块最多采样像素数、最低样本量
+TOOL_OPTIMIZE_MAX_SAMPLES = 40000
+TOOL_OPTIMIZE_MAX_SAMPLES_PER_BLOCK = 4000
+TOOL_OPTIMIZE_MIN_SAMPLES = 300
+# 预览图返回给页面的最长边（分类图会等比下采样，点击坐标按归一化值回传）
+TOOL_PREVIEW_MAX_SIDE = 1000
+# 缩略图最长边
+TOOL_THUMB_MAX_SIDE = 240
 
 # --- 调度器配置 ---
 # 是否在应用启动时跳过第一次立即执行的分析任务

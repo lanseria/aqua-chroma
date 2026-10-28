@@ -1,5 +1,5 @@
 # app/models.py
-from sqlalchemy import Column, DateTime, Integer, String, Float, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Integer, String, Float, Text
 from .database import Base
 
 class AnalysisResult(Base):
@@ -41,25 +41,3 @@ class AppSetting(Base):
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=False)          # JSON 文本
     updated_at = Column(DateTime(timezone=True), nullable=False)
-
-
-class PreviewTag(Base):
-    """
-    分析结果时间点的自定义类型标签（tag）。
-
-    把真实分析结果当作"分类型测试样本"：例如给某时间点打上 晴朗天空/多云/薄雾，
-    颜色阈值调优页即可按 tag 筛选预览源。tag 是用户数据（持久化在数据库），
-    不是写死的配置；PRESETS 只是页面上的录入候选建议。
-
-    同一个时间点可以打多个 tag；同一 (timestamp, tag) 由唯一约束保证不重复。
-    """
-    __tablename__ = "preview_tags"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp = Column(Integer, nullable=False, index=True)   # 分析结果时间戳（秒）
-    tag = Column(String(32), nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("timestamp", "tag", name="uq_preview_tags_timestamp_tag"),
-    )

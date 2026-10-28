@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light">
-    <title>颜色阈值实时调优 · Aqua-Chroma</title>
+    <title>颜色阈值智能调优 · Aqua-Chroma</title>
     <style>
         /* ============================================================
-           颜色阈值实时调优 —— 单文件模板（内联样式，离线可用）
+           颜色阈值智能调优 —— 单文件模板（内联样式，离线可用）
+           流程：导入卫星图 → 点击色块纠正 → 自动优化 HSV 参数 → 保存即生效
            设计基调：浅色仪表盘，密集但克制；所有数值使用等宽字体。
            ============================================================ */
         :root {
@@ -113,7 +114,7 @@
         }
         .brand-text p {
             margin: 3px 0 0;
-            max-width: 660px;
+            max-width: 760px;
             font-size: 12.5px;
             color: var(--muted);
         }
@@ -259,7 +260,8 @@
 
         .group,
         .action-dock,
-        .card {
+        .card,
+        .note {
             background: var(--panel);
             border: 1px solid var(--line);
             border-radius: var(--radius);
@@ -325,7 +327,7 @@
             -webkit-appearance: none;
             appearance: none;
             width: 100%;
-            height: 32px; /* 保持 >=32px 的可点击命中区域 */
+            height: 32px;
             margin: 0;
             background: transparent;
             cursor: pointer;
@@ -456,6 +458,13 @@
             font-variant-numeric: tabular-nums;
         }
 
+        /* ---------- 左栏说明 ---------- */
+        .note { padding: 11px 13px 12px; font-size: 11.5px; color: var(--muted); }
+        .note b { display: block; margin-bottom: 3px; font-size: 10.5px; letter-spacing: .08em; color: var(--muted-2); text-transform: uppercase; }
+        .note p { margin: 0 0 4px; }
+        .note p:last-child { margin-bottom: 0; }
+        .note code { font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft); }
+
         /* ---------- 操作区 ---------- */
         .action-dock {
             flex: 0 0 auto;
@@ -541,7 +550,7 @@
         .btn-danger-ghost { color: var(--danger); border-color: #f0c6c3; background: #fffafa; }
         .btn-danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: #e5a9a4; }
 
-        /* ---------- 预览区 ---------- */
+        /* ---------- 右栏卡片 ---------- */
         .preview-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
         .card { padding: 14px 16px; }
         .card-head {
@@ -560,7 +569,7 @@
             letter-spacing: .04em;
             color: var(--ink-soft);
         }
-        .card-sub { margin: 2px 0 0; font-size: 11.5px; color: var(--muted-2); }
+        .card-sub { margin: 2px 0 0; max-width: 780px; font-size: 11.5px; color: var(--muted-2); }
         .badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
         .badge {
             display: inline-flex;
@@ -576,249 +585,198 @@
             white-space: nowrap;
         }
         .badge-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-        .badge[data-status="completed"] { border-color: #bfe0ce; background: var(--ok-soft); color: var(--ok); }
-        .badge[data-status="cloudy"] { border-color: #d3dfe9; background: #eef3f8; color: #45586d; }
         .badge-latency { border-color: #cfe3fa; background: var(--accent-soft); color: #2f6db3; }
 
-        .source-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .field-label { font-size: 12px; font-weight: 600; color: var(--ink-soft); min-width: 44px; }
-        .dt-input {
-            flex: 1 1 240px;
-            min-width: 200px;
-            max-width: 100%;
-            min-height: 34px;
-            padding: 5px 10px;
-            border: 1px solid var(--line-strong);
-            border-radius: 9px;
-            background: #fff;
-            color: var(--ink);
-            font: inherit;
-            font-family: var(--mono);
-            font-size: 12.5px;
-            font-variant-numeric: tabular-nums;
-        }
-        .dt-input:hover:not(:disabled) { border-color: #a9bccd; }
-        .dt-input:disabled { background: #f5f8fb; color: var(--muted); }
-        .dt-hint { margin-top: 7px; }
-        .dt-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-        .dt-suggestion {
-            min-height: 28px;
-            padding: 3px 10px;
-            border: 1px solid #cfe3fa;
-            border-radius: 999px;
-            background: var(--accent-soft);
-            color: #2f6db3;
-            font: inherit;
-            font-family: var(--mono);
-            font-size: 11px;
-            cursor: pointer;
-        }
-        .dt-suggestion:hover { border-color: #9fc6f5; background: #e0efff; }
-        .dt-suggestion:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-        .source-meta {
+        /* ---------- 导入卫星图片 ---------- */
+        .dropzone {
+            position: relative;
             display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 10px;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 132px;
+            padding: 18px 16px;
+            border: 1.5px dashed var(--line-strong);
+            border-radius: var(--radius-sm);
+            background: linear-gradient(180deg, #fbfdff, #f6fafd);
+            text-align: center;
+            transition: border-color .15s, background .15s, box-shadow .15s;
+        }
+        .dropzone:hover { border-color: #a9c8e8; background: #f4faff; }
+        .dropzone.is-dragover {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+            box-shadow: 0 0 0 4px rgba(0, 123, 255, .1);
+        }
+        .dropzone[aria-busy="true"] { cursor: progress; }
+        .dropzone-icon { color: #7ba7cf; }
+        .dropzone-title { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+        .dropzone-title button { vertical-align: baseline; }
+        .dropzone-hint {
+            margin: 0;
+            max-width: 620px;
+            font-size: 11.5px;
+            color: var(--muted-2);
+            line-height: 1.55;
+        }
+        .dropzone-veil {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            padding: 16px;
+            border-radius: inherit;
+            background: rgba(247, 251, 254, .9);
+            z-index: 2;
+        }
+        .dropzone.is-uploading .dropzone-veil { display: flex; }
+        .import-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             flex-wrap: wrap;
             margin-top: 10px;
-            font-size: 11.5px;
-            color: var(--muted);
-        }
-        .source-total { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-        .source-current { font-weight: 600; color: var(--ink-soft); }
-
-        .tag-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; min-height: 26px; }
-        .tag-filter-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            min-height: 26px;
-            padding: 2px 10px;
-            border: 1px solid var(--line-strong);
-            border-radius: 999px;
-            background: #fff;
-            color: var(--ink-soft);
-            font: inherit;
-            font-size: 11.5px;
-            cursor: pointer;
-        }
-        .tag-filter-chip:hover { background: #f4f8fc; border-color: #b9cbdd; }
-        .tag-filter-chip.is-active { background: var(--accent-soft); border-color: #9fc6f5; color: #0b5cad; font-weight: 700; }
-        .tag-filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        .tag-filter-count {
-            font-family: var(--mono);
-            font-size: 10.5px;
-            color: var(--muted);
-            background: #eef3f8;
-            border-radius: 999px;
-            padding: 0 5px;
-        }
-        .tag-filter-chip.is-active .tag-filter-count { background: #fff; color: #0b5cad; }
-
-        .source-list-wrap {
-            position: relative;
-            margin-top: 8px;
+            padding: 7px 10px;
             border: 1px solid var(--line);
             border-radius: 10px;
             background: var(--panel-2);
-            overflow: hidden;
+            font-size: 12px;
+            color: var(--ink-soft);
         }
-        .source-list {
-            list-style: none;
+        .import-summary b { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+        .import-truncated { font-size: 11px; color: var(--warn); }
+        .skip-toggle { margin-left: auto; }
+        .skip-list {
+            margin: 8px 0 0;
+            padding: 8px 12px;
+            border: 1px solid #f3e3c8;
+            border-radius: 10px;
+            background: #fffcf4;
+            font-size: 11.5px;
+            color: var(--warn);
+        }
+        .skip-list ul { margin: 0; padding-left: 18px; max-height: 148px; overflow-y: auto; }
+        .skip-list li { margin: 1px 0; overflow-wrap: anywhere; }
+        .skip-more { margin: 5px 0 0; color: var(--muted); }
+        .import-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+        .import-bar { flex: 1 1 auto; height: 6px; border-radius: 999px; background: #e8eef5; overflow: hidden; }
+        .import-bar i { display: block; width: 0; height: 100%; border-radius: 999px; background: var(--accent); transition: width .2s ease; }
+        .import-progress-text {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+            white-space: nowrap;
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .thumb-strip-wrap { margin-top: 12px; }
+        .thumb-strip {
+            position: relative;
             display: flex;
-            flex-direction: column;
-            gap: 2px;
-            max-height: 224px;
-            margin: 0;
-            padding: 4px;
-            overflow-y: auto;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 2px 2px 8px;
+            min-height: 112px;
             scrollbar-width: thin;
         }
-        .source-list::-webkit-scrollbar { width: 8px; }
-        .source-list::-webkit-scrollbar-thumb { background: #d5e0ea; border-radius: 999px; }
-        .source-list::-webkit-scrollbar-track { background: transparent; }
-        .source-list-wrap[aria-busy="true"] .source-list { opacity: .55; }
-        .source-item {
-            display: grid;
-            grid-template-columns: 112px minmax(0, 1fr);
-            gap: 8px;
-            align-items: center;
-            min-height: 32px;
-            padding: 5px 8px;
-            border: 1px solid transparent;
-            border-radius: 8px;
+        .thumb-strip::-webkit-scrollbar { height: 8px; }
+        .thumb-strip::-webkit-scrollbar-thumb { background: #d5e0ea; border-radius: 999px; }
+        .thumb-strip::-webkit-scrollbar-track { background: transparent; }
+        .thumb {
+            position: relative;
+            flex: 0 0 auto;
+            width: 168px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 6px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #fff;
             cursor: pointer;
+            transition: border-color .15s, box-shadow .15s, background .15s;
         }
-        .source-item:hover { background: #f2f8ff; border-color: #dbeafe; }
-        .source-item.is-selected { background: var(--accent-soft); border-color: #a9d0fa; box-shadow: inset 3px 0 0 var(--accent); }
-        .source-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-        .source-item-time {
-            font-family: var(--mono);
-            font-size: 12px;
-            color: var(--ink);
-            font-variant-numeric: tabular-nums;
+        .thumb:hover { border-color: #b9cbdd; background: #f8fbff; }
+        .thumb.is-selected { border-color: #9fc6f5; background: var(--accent-soft); box-shadow: inset 0 0 0 1px #9fc6f5; }
+        .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .thumb-frame {
+            position: relative;
+            display: block;
+            height: 88px;
+            border-radius: 7px;
+            overflow: hidden;
+            background: repeating-conic-gradient(#eef2f6 0 25%, #fbfdff 0 50%) 50% / 12px 12px;
+        }
+        .thumb-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .thumb-frame.is-broken img { display: none; }
+        .thumb-fallback {
+            display: none;
+            position: absolute;
+            inset: 0;
+            place-items: center;
+            padding: 4px;
+            text-align: center;
+            font-size: 10.5px;
+            color: var(--danger);
+        }
+        .thumb-frame.is-broken .thumb-fallback { display: grid; }
+        .thumb-name {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--ink-soft);
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .source-item.is-selected .source-item-time { font-weight: 700; color: #0b4c8c; }
-        .source-item-tags { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
-        .source-tag-chip {
-            display: inline-flex;
-            align-items: center;
-            padding: 1px 7px;
-            border: 1px solid #d7e4f2;
+        .thumb-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .thumb-dims { font-family: var(--mono); font-size: 10px; color: var(--muted-2); white-space: nowrap; }
+        .thumb-count {
+            padding: 0 6px;
+            border: 1px solid #bfe0ce;
             border-radius: 999px;
-            background: #f2f7fd;
-            color: #3c5a78;
+            background: var(--ok-soft);
+            color: var(--ok);
             font-size: 10.5px;
             white-space: nowrap;
         }
-        .source-tag-none { font-size: 10.5px; color: var(--muted-2); }
-        .source-empty { margin: 0; padding: 18px 12px; text-align: center; font-size: 12px; color: var(--muted); }
-        .source-truncated { margin: 6px 0 0; font-size: 11px; color: var(--warn); }
-
-        /* ---------- 时间点标签编辑 ---------- */
-        .badge-tag-dirty { border-color: #f3d7a8; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
-        .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
-        .tag-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 6px 3px 10px;
-            border: 1px solid #cfe3fa;
-            border-radius: 999px;
-            background: #eef5ff;
-            color: #245a92;
-            font-size: 12px;
-        }
-        .tag-chip-remove {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 22px;
-            height: 22px;
-            border: none;
+        .thumb-count.is-zero { border-color: var(--line); background: #f2f6fa; color: var(--muted-2); }
+        .thumb-del {
+            position: absolute;
+            top: 10px; right: 10px;
+            width: 22px; height: 22px;
+            display: grid; place-items: center;
+            border: 1px solid rgba(255, 255, 255, .7);
             border-radius: 50%;
-            background: transparent;
-            color: #3f6fa0;
+            background: rgba(24, 38, 56, .62);
+            color: #fff;
             font: inherit;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1;
             cursor: pointer;
+            opacity: 0;
+            transition: opacity .15s, background .15s;
         }
-        .tag-chip-remove:hover { background: #d7e8fb; color: #8f1f1f; }
-        .tag-chip-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-        .tag-empty { margin: 0 0 2px; font-size: 11.5px; color: var(--muted-2); }
-        .tag-add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-        .tag-input {
-            flex: 1 1 220px;
-            min-width: 180px;
-            max-width: 100%;
-            min-height: 32px;
-            padding: 4px 10px;
-            border: 1px solid var(--line-strong);
-            border-radius: 8px;
-            background: #fff;
-            color: var(--ink);
-            font: inherit;
-            font-size: 12.5px;
-        }
-        .tag-input:hover:not(:disabled) { border-color: #a9bccd; }
-        .tag-input:disabled { background: #f5f8fb; color: var(--muted); }
-        .tag-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
-        .tag-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-        .tag-preset {
-            min-height: 28px;
-            padding: 3px 10px;
-            border: 1px dashed var(--line-strong);
-            border-radius: 999px;
-            background: #fff;
-            color: var(--ink-soft);
-            font: inherit;
-            font-size: 11.5px;
-            cursor: pointer;
-        }
-        .tag-preset:hover:not(:disabled) { border-color: #9fc6f5; background: var(--accent-soft); color: #0b5cad; }
-        .tag-preset:disabled { opacity: .45; cursor: not-allowed; border-style: solid; }
-        .tag-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        .tag-editor-foot {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 10px;
-            padding-top: 9px;
-            border-top: 1px dashed var(--line);
-        }
-        .tag-validation { margin: 0; min-height: 16px; font-size: 11.5px; color: var(--danger); }
-        .preview-hint {
-            display: flex;
-            align-items: flex-start;
-            gap: 6px;
-            min-height: 18px;
-            margin: 9px 0 0;
-            font-size: 11.5px;
+        .thumb:hover .thumb-del,
+        .thumb-del:focus-visible { opacity: 1; }
+        .thumb-del:hover:not(:disabled) { background: var(--danger); }
+        .strip-empty {
+            margin: 0;
+            padding: 18px 12px;
+            border: 1px dashed var(--line);
+            border-radius: 10px;
+            text-align: center;
+            font-size: 12px;
             color: var(--muted);
+            background: var(--panel-2);
         }
-        .preview-hint::before {
-            content: "";
-            flex: 0 0 auto;
-            width: 6px; height: 6px;
-            margin-top: 6px;
-            border-radius: 50%;
-            background: var(--muted-2);
-        }
-        .preview-hint[data-tone="busy"] { color: #2f6db3; }
-        .preview-hint[data-tone="busy"]::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-        .preview-hint[data-tone="ok"] { color: var(--ok); }
-        .preview-hint[data-tone="ok"]::before { background: var(--ok); }
-        .preview-hint[data-tone="warn"] { color: var(--warn); }
-        .preview-hint[data-tone="warn"]::before { background: var(--warn); }
-        .preview-hint[data-tone="error"] { color: var(--danger); }
-        .preview-hint[data-tone="error"]::before { background: var(--danger); }
 
+        /* ---------- 双图与色块浮层 ---------- */
         .img-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .img-fig { margin: 0; min-width: 0; }
         .img-fig figcaption {
@@ -832,6 +790,18 @@
             color: var(--ink-soft);
         }
         .src-tag { font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--muted-2); }
+        .click-tip {
+            margin-left: 4px;
+            padding: 0 6px;
+            border: 1px solid #cfe3fa;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: #2f6db3;
+            font-family: var(--font);
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .img-stage { position: relative; }
         .img-frame {
             position: relative;
             display: grid;
@@ -847,13 +817,14 @@
         .img-frame img {
             display: block;
             max-width: 100%;
-            max-height: min(62vh, 560px);
+            max-height: min(58vh, 520px);
             height: auto;
             border-radius: 8px;
             opacity: 0;
             transition: opacity .25s ease;
         }
         .img-frame.is-loaded img { opacity: 1; }
+        .img-frame.is-clickable img { cursor: crosshair; }
         .frame-empty,
         .frame-error { margin: 0; padding: 24px 12px; text-align: center; font-size: 12px; }
         .frame-empty { color: var(--muted); }
@@ -885,6 +856,211 @@
             animation: spin .9s linear infinite;
         }
 
+        .block-popover {
+            position: absolute;
+            right: 8px;
+            bottom: 8px;
+            z-index: 5;
+            width: min(306px, calc(100% - 16px));
+            padding: 10px 12px 11px;
+            border: 1px solid #cfe0f2;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, .975);
+            box-shadow: 0 16px 36px -18px rgba(16, 38, 64, .5), 0 1px 2px rgba(16, 38, 64, .08);
+        }
+        .popover-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+        .popover-title { font-family: var(--mono); font-size: 12.5px; font-weight: 700; color: var(--ink); }
+        .popover-close {
+            width: 26px; height: 26px;
+            display: grid; place-items: center;
+            border: 1px solid transparent;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .popover-close:hover { background: #eef4fa; color: var(--ink); }
+        .popover-meta {
+            display: grid;
+            grid-template-columns: 64px minmax(0, 1fr);
+            gap: 1px 8px;
+            margin: 0 0 8px;
+            font-size: 11.5px;
+        }
+        .popover-meta dt { color: var(--muted-2); }
+        .popover-meta dd {
+            margin: 0;
+            color: var(--ink-soft);
+            font-family: var(--mono);
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+        .popover-meta .swatch {
+            display: inline-block;
+            width: 10px; height: 10px;
+            margin-right: 4px;
+            border: 1px solid rgba(0, 0, 0, .16);
+            border-radius: 3px;
+            vertical-align: -1px;
+        }
+        .popover-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+        .popover-actions .btn { min-height: 32px; padding: 4px 3px; font-size: 11.5px; }
+        .btn-label-cloud.is-active { background: #eef3f8; border-color: #a9b8c8; color: #39485a; box-shadow: inset 0 0 0 1px #a9b8c8; }
+        .btn-label-blue.is-active { background: var(--accent-soft); border-color: #9fc6f5; color: #0b5cad; box-shadow: inset 0 0 0 1px #9fc6f5; }
+        .btn-label-yellow.is-active { background: #fff7e3; border-color: #e8c46a; color: #8a6100; box-shadow: inset 0 0 0 1px #e8c46a; }
+        .btn-label-ignore.is-active { background: #f1f3f5; border-color: #b9c2cb; color: #4c5866; box-shadow: inset 0 0 0 1px #b9c2cb; }
+        .popover-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 7px; }
+        .popover-note { margin: 0; font-size: 10.5px; color: var(--muted-2); line-height: 1.45; text-align: right; }
+        .popover-note kbd { font-size: 9.5px; padding: 1px 4px; }
+
+        .correction-foot { display: flex; align-items: flex-start; gap: 10px; }
+        .correction-foot .preview-hint { flex: 1 1 auto; }
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px 16px;
+            margin: 7px 0 0;
+            padding: 0;
+            list-style: none;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .legend li { display: inline-flex; align-items: center; gap: 5px; }
+        .legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
+        .legend .c-match { background: #20a464; }
+        .legend .c-miss { background: #e8892b; }
+        .legend .c-ignore { background: #8a939e; }
+
+        .chip-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; min-height: 26px; }
+        .corr-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+        .chip-actions { margin-left: auto; }
+        .corr-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 3px 3px 9px;
+            border: 1px solid var(--line-strong);
+            border-radius: 999px;
+            background: #fff;
+            font-size: 11.5px;
+            color: var(--ink-soft);
+        }
+        .corr-chip.is-mismatch { border-color: #f0c6c3; background: #fff7f6; }
+        .corr-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+        .corr-id { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+        .corr-ratio { font-family: var(--mono); font-size: 10.5px; color: var(--muted-2); }
+        .corr-remove {
+            width: 20px; height: 20px;
+            display: grid; place-items: center;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-size: 13px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .corr-remove:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+        .corr-remove:disabled { opacity: .4; cursor: not-allowed; }
+        .chip-empty { margin: 0; font-size: 11.5px; color: var(--muted-2); }
+
+        .preview-hint {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            min-height: 18px;
+            margin: 9px 0 0;
+            font-size: 11.5px;
+            color: var(--muted);
+        }
+        .preview-hint::before {
+            content: "";
+            flex: 0 0 auto;
+            width: 6px; height: 6px;
+            margin-top: 6px;
+            border-radius: 50%;
+            background: var(--muted-2);
+        }
+        .preview-hint[data-tone="busy"] { color: #2f6db3; }
+        .preview-hint[data-tone="busy"]::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+        .preview-hint[data-tone="ok"] { color: var(--ok); }
+        .preview-hint[data-tone="ok"]::before { background: var(--ok); }
+        .preview-hint[data-tone="warn"] { color: var(--warn); }
+        .preview-hint[data-tone="warn"]::before { background: var(--warn); }
+        .preview-hint[data-tone="error"] { color: var(--danger); }
+        .preview-hint[data-tone="error"]::before { background: var(--danger); }
+
+        /* ---------- 自动优化 ---------- */
+        .optimize { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line); }
+        .optimize-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .opt-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 32px;
+            font-size: 12px;
+            color: var(--ink-soft);
+            cursor: pointer;
+            user-select: none;
+        }
+        .opt-switch input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+        .optimize-status { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+        .opt-panel {
+            margin-top: 10px;
+            padding: 11px 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: linear-gradient(180deg, #ffffff, #f9fcff);
+        }
+        .opt-accuracy { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .opt-acc {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 104px;
+            padding: 7px 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #fff;
+        }
+        .opt-acc span { font-size: 10.5px; color: var(--muted); }
+        .opt-acc b { font-family: var(--mono); font-size: 18px; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums; }
+        .opt-acc.is-after { border-color: #bfe0ce; background: var(--ok-soft); }
+        .opt-acc.is-after b { color: var(--ok); }
+        .opt-arrow { color: var(--muted-2); font-size: 16px; }
+        .opt-delta { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--ok); }
+        .opt-delta.is-down { color: var(--danger); }
+        .opt-message { margin: 9px 0 0; font-size: 12px; color: var(--ink-soft); }
+        .opt-message.is-warn { color: var(--warn); }
+        .opt-stats { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 6px 0 0; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+        .diff-table-wrap { margin-top: 9px; overflow: hidden; overflow-y: auto; max-height: 192px; border: 1px solid var(--line); border-radius: 10px; }
+        .diff-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+        .diff-table th {
+            position: sticky;
+            top: 0;
+            padding: 5px 9px;
+            border-bottom: 1px solid var(--line);
+            background: #f4f8fc;
+            color: var(--muted);
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: .03em;
+            text-align: left;
+        }
+        .diff-table td { padding: 5px 9px; border-bottom: 1px solid #eef3f8; color: var(--ink-soft); }
+        .diff-table tr:last-child td { border-bottom: none; }
+        .diff-table td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+        .diff-table .from { color: var(--muted); }
+        .diff-table .to { color: var(--ok); font-weight: 700; }
+        .diff-empty { margin: 0; padding: 10px; text-align: center; font-size: 11.5px; color: var(--muted-2); }
+        .opt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        .opt-actions-note { font-size: 11px; color: var(--muted-2); }
+
+        /* ---------- 指标 ---------- */
         .metrics-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
@@ -922,6 +1098,8 @@
         .metric[data-tone="cloud"] .metric-bar i { background: #7d8fa3; }
         .metric[data-tone="sea"] .metric-bar i { background: #1f7ae0; }
         .metric[data-tone="index"] .metric-bar i { background: #12a594; }
+        .metric[data-tone="ok"] .metric-bar i { background: var(--ok); }
+        .metric[data-tone="warn"] .metric-bar i { background: #e0a020; }
         .metrics-grid.is-empty .metric-value,
         .metrics-grid.is-empty .metric-hint { color: #b3c0cf; }
 
@@ -948,11 +1126,15 @@
         .toast.toast-ok { background: #0d5c46; }
         .toast.toast-error { background: #8f1f1f; }
         .toast.toast-info { background: #24425f; }
+        .toast.toast-warn { background: #7a4a00; }
 
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
         /* ---------- 响应式 ---------- */
+        @media (hover: none) {
+            .thumb-del { opacity: 1; }
+        }
         @media (max-width: 1099px) {
             .layout { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 24px; }
             .sidebar { position: static; max-height: none; }
@@ -966,11 +1148,14 @@
             .topbar-main { gap: 10px; }
             .layout { padding: 14px 14px 24px; }
             .alert { margin: 12px 14px 0; }
+            .block-popover { width: calc(100% - 16px); }
+            .img-frame img { max-height: 52vh; }
         }
         @media (max-width: 560px) {
             .ctrl { grid-template-columns: 72px minmax(0, 1fr) 60px; gap: 8px; }
             .card { padding: 12px; }
             .metric-value { font-size: 17px; }
+            .popover-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
@@ -986,7 +1171,7 @@
 {% set bootstrap_state = initial_state if (initial_state is defined and initial_state) else none %}
 {% set class_defs = [
     {'key': 'CLOUD', 'label': '云层', 'tone': 'cloud', 'caption': '云层 / 高亮区域'},
-    {'key': 'BLUE_WATER', 'label': '蓝水', 'tone': 'water', 'caption': '蓝色水体（可见海洋）'}
+    {'key': 'BLUE_WATER', 'label': '蓝海', 'tone': 'water', 'caption': '蓝色水体（可见海洋）'}
 ] %}
 {% set bound_defs = [
     {'key': 'lower', 'label': '下限', 'en': 'lower'},
@@ -998,7 +1183,7 @@
     {'key': 'V', 'cn': '明度', 'min': 0, 'max': 255}
 ] %}
 
-<a class="skip-link" href="#preview">跳到预览区</a>
+<a class="skip-link" href="#card-import">跳到图片实验台</a>
 
 <header class="topbar">
     <div class="topbar-main">
@@ -1010,8 +1195,8 @@
                 </svg>
             </span>
             <div class="brand-text">
-                <h1>颜色阈值实时调优</h1>
-                <p>保存的阈值持久化在 PostgreSQL 中，下一次定时分析立即使用新值——无需重启服务，也无需修改 .env 配置。</p>
+                <h1>颜色阈值智能调优</h1>
+                <p>导入卫星图 → 点击色块纠正 → 自动优化参数 → 保存即生效。阈值保存在 PostgreSQL，下一次定时分析立即使用新值。</p>
             </div>
         </div>
         <nav class="topbar-links" aria-label="页面导航">
@@ -1111,6 +1296,12 @@
                 </div>
             </section>
             {% endfor %}
+
+            <section class="note" aria-label="类别规则说明">
+                <b>类别规则</b>
+                <p>黄海 = 既不是云、也不是蓝水的海洋像素（由上面两组阈值共同决定）。</p>
+                <p>「忽略」用于标记陆地 / 非海域色块，会被排除出指标统计。</p>
+            </section>
         </div>
 
         <div class="action-dock">
@@ -1123,106 +1314,185 @@
                 <button type="button" class="btn" id="btn-load-defaults" disabled title="仅填充表单，不写入数据库">载入默认值（不保存）</button>
                 <button type="button" class="btn btn-danger-ghost" id="btn-reset" disabled title="恢复内置默认阈值并立即覆盖数据库配置">恢复内置默认</button>
             </div>
-            <p class="dock-hint">快捷键 <kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>S</kbd> 保存 · 预览请求自动防抖 180 ms · <kbd>Esc</kbd> 关闭错误提示</p>
+            <p class="dock-hint">
+                快捷键 <kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>S</kbd> 保存 ·
+                <kbd>1</kbd>–<kbd>4</kbd> 标注色块 ·
+                <kbd>Esc</kbd> 关闭浮层 · 预览防抖 180 ms
+            </p>
         </div>
     </aside>
 
     <section class="preview-col">
-        <section class="card" id="preview" aria-label="实时预览">
+        <section class="card" id="card-import" aria-label="导入卫星图片">
             <div class="card-head">
                 <div class="card-heading">
-                    <h2>实时预览</h2>
-                    <p class="card-sub">阈值改动会立刻重算；首次载入时使用数据库中已保存的配置。</p>
+                    <h2>1 · 导入卫星图片</h2>
+                    <p class="card-sub">拖入图片或 ZIP 批量导入；后端会等比缩放并生成分析输入与缩略图，用当前生效的 HSV 参数自动分类。</p>
                 </div>
                 <div class="badges">
-                    <span id="status-badge" class="badge" hidden>状态：—</span>
-                    <span id="latency-badge" class="badge badge-mono badge-latency" hidden>— ms</span>
+                    <span id="image-count-badge" class="badge badge-mono">已导入 0 张</span>
+                    <button type="button" class="btn btn-sm btn-danger-ghost" id="btn-clear-images" disabled>清空全部</button>
+                </div>
+            </div>
+
+            <div class="dropzone" id="dropzone" role="button" tabindex="0"
+                 aria-label="拖放或点击选择卫星图片，支持 ZIP 批量导入">
+                <span class="dropzone-icon" aria-hidden="true">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 16V4m0 0 4 4m-4-4-4 4"/>
+                        <path d="M4 15v2.5A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V15"/>
+                    </svg>
+                </span>
+                <p class="dropzone-title">拖放卫星图片到此处，或
+                    <button type="button" class="btn btn-sm" id="btn-pick-files">选择文件</button>
+                </p>
+                <p class="dropzone-hint" id="dropzone-hint">支持 png / jpg / webp / bmp / tif；单次 ≤ 60 MB，最多保留 60 张，图片会等比缩放到最长边 1600 px。ZIP 内按条目批量导入。</p>
+                <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.zip" multiple hidden>
+                <div class="dropzone-veil" aria-hidden="true">
+                    <span class="spinner"></span>
+                    <span class="veil-text" id="import-veil-text">正在导入图片…</span>
+                </div>
+            </div>
+
+            <div class="import-progress" id="import-progress" hidden>
+                <div class="import-bar" aria-hidden="true"><i id="import-bar-fill"></i></div>
+                <span class="import-progress-text" id="import-progress-text" role="status" aria-live="polite">正在导入…</span>
+            </div>
+            <div class="import-summary" id="import-summary" role="status" aria-live="polite" hidden></div>
+            <div class="skip-list" id="skip-list" hidden></div>
+
+            <div class="thumb-strip-wrap">
+                <div class="thumb-strip" id="thumb-strip" role="listbox" aria-label="已导入图片（点击选中）"></div>
+                <p class="strip-empty" id="thumb-empty">还没有导入图片。拖入单张图片，或选择一个 ZIP 批量导入。</p>
+            </div>
+        </section>
+
+        <section class="card" id="card-correct" aria-label="色块纠正">
+            <div class="card-head">
+                <div class="card-heading">
+                    <h2>2 · 色块纠正</h2>
+                    <p class="card-sub">点击右侧分类结果图中的色块，指定它真实的类别；标注会作为自动优化的训练样本。</p>
+                </div>
+                <div class="badges">
+                    <span id="cur-image-badge" class="badge badge-mono">未选择图片</span>
+                    <span id="blocks-badge" class="badge badge-mono">色块 —</span>
+                    <span id="corrections-badge" class="badge badge-mono">已纠正 0</span>
+                    <span id="ignored-badge" class="badge badge-mono">忽略占比 —</span>
+                    <span id="accuracy-badge" class="badge badge-mono">纠正符合率 —</span>
                     <span id="dims-badge" class="badge badge-mono" hidden>— × — px</span>
                 </div>
             </div>
-            <div class="source-toolbar">
-                <label class="field-label" for="source-datetime">选取时间</label>
-                <input class="dt-input" id="source-datetime" type="datetime-local" step="60" disabled>
-                <button type="button" class="btn btn-sm" id="btn-pick-datetime" disabled>选用该时间</button>
-                <button type="button" class="btn btn-sm" id="btn-refresh-sources" title="重新读取可用时间点与标签">刷新列表</button>
-                <button type="button" class="btn btn-sm" id="btn-rerun" disabled>重跑当前预览</button>
-            </div>
-            <p id="dt-hint" class="preview-hint dt-hint" data-tone="muted" aria-live="polite">正在读取可用时间点…</p>
-            <div class="dt-suggestions" id="dt-suggestions" hidden></div>
-            <div class="source-meta">
-                <span id="source-total" class="source-total">共 — 个可用时间点</span>
-                <span id="source-current" class="source-current">当前选中：—</span>
-            </div>
-            <div class="tag-filter" id="tag-filter" role="group" aria-label="按标签过滤时间点"></div>
-            <div class="source-list-wrap" id="source-list-wrap">
-                <ul class="source-list" id="source-list" role="listbox" aria-label="可用分析时间点（最新在前）"></ul>
-                <p class="source-empty" id="source-list-empty" hidden>没有可选的时间点</p>
-            </div>
-            <p class="source-truncated" id="source-truncated" hidden></p>
-            <p id="preview-hint" class="preview-hint" data-tone="busy" aria-live="polite">正在初始化…</p>
-        </section>
 
-        <section class="card" aria-label="时间点标签">
-            <div class="card-head">
-                <div class="card-heading">
-                    <h2>时间点标签</h2>
-                    <p class="card-sub">给分析结果打场景标签（如 晴朗天空 / 多云 / 薄雾），当作分类型测试样本；在上方点标签 chip 可按标签筛选时间点。</p>
-                </div>
-                <div class="badges">
-                    <span id="tag-current-dt" class="badge badge-mono">未选择时间点</span>
-                    <span id="tag-dirty" class="badge badge-tag-dirty" hidden>标签未保存</span>
-                </div>
-            </div>
-            <div class="tag-chips" id="tag-current-chips"></div>
-            <p class="tag-empty" id="tag-current-empty">请先在上方选择一个时间点。</p>
-            <div class="tag-add-row">
-                <label class="field-label" for="tag-input">添加标签</label>
-                <input class="tag-input" id="tag-input" type="text" list="tag-suggestions" maxlength="24"
-                       autocomplete="off" spellcheck="false" placeholder="输入标签后回车，如：晴朗天空" disabled>
-                <datalist id="tag-suggestions"></datalist>
-                <button type="button" class="btn btn-sm" id="btn-add-tag" disabled>添加</button>
-            </div>
-            <div class="tag-presets" id="tag-presets" role="group" aria-label="预设标签"></div>
-            <div class="tag-editor-foot">
-                <p class="tag-validation" id="tag-validation" role="status" aria-live="polite"></p>
-                <button type="button" class="btn btn-sm" id="btn-save-tags" disabled>保存标签</button>
-            </div>
-        </section>
-
-        <section class="card" aria-label="预览图像">
             <div class="img-grid">
                 <figure class="img-fig">
-                    <figcaption><span>处理后的输入</span><span class="src-tag">source_preview</span></figcaption>
-                    <div class="img-frame is-empty" id="frame-source">
-                        <img id="img-source" alt="处理后的输入图像（预览源）" decoding="async">
-                        <p class="frame-empty">等待首次预览…</p>
-                        <p class="frame-error">图像生成失败</p>
-                        <div class="frame-veil" aria-hidden="true">
-                            <span class="spinner"></span>
-                            <span class="veil-text">正在生成预览…</span>
+                    <figcaption><span>分析输入</span><span class="src-tag">source_preview</span></figcaption>
+                    <div class="img-stage">
+                        <div class="img-frame is-empty" id="frame-source" aria-live="polite">
+                            <img id="img-source" alt="分析输入图（缩放后的卫星图片）" decoding="async">
+                            <p class="frame-empty">还没有导入图片</p>
+                            <p class="frame-error">图像加载失败，点击「重新预览」重试</p>
+                            <div class="frame-veil" aria-hidden="true">
+                                <span class="spinner"></span>
+                                <span class="veil-text">正在生成预览…</span>
+                            </div>
                         </div>
                     </div>
                 </figure>
                 <figure class="img-fig">
-                    <figcaption><span>HSV 分类结果</span><span class="src-tag">classification</span></figcaption>
-                    <div class="img-frame is-empty" id="frame-classification">
-                        <img id="img-classification" alt="HSV 颜色分类结果图" decoding="async">
-                        <p class="frame-empty">等待首次预览…</p>
-                        <p class="frame-error">图像生成失败</p>
-                        <div class="frame-veil" aria-hidden="true">
-                            <span class="spinner"></span>
-                            <span class="veil-text">正在生成预览…</span>
+                    <figcaption>
+                        <span>HSV 分类结果 <span class="click-tip">点击色块</span></span>
+                        <span class="src-tag">classification</span>
+                    </figcaption>
+                    <div class="img-stage">
+                        <div class="img-frame is-empty" id="frame-classification" aria-live="polite">
+                            <img id="img-classification" alt="HSV 分类结果图，点击色块进行纠正" tabindex="0" decoding="async">
+                            <p class="frame-empty">还没有导入图片</p>
+                            <p class="frame-error">图像加载失败，点击「重新预览」重试</p>
+                            <div class="frame-veil" aria-hidden="true">
+                                <span class="spinner"></span>
+                                <span class="veil-text">正在生成预览…</span>
+                            </div>
+                        </div>
+
+                        <div class="block-popover" id="block-popover" role="dialog" aria-label="色块操作浮层" hidden>
+                            <div class="popover-head">
+                                <span class="popover-title" id="popover-title">色块 #—</span>
+                                <button type="button" class="popover-close" id="btn-close-popover" aria-label="关闭色块浮层">×</button>
+                            </div>
+                            <dl class="popover-meta">
+                                <dt>像素数</dt><dd id="popover-pixels">—</dd>
+                                <dt>均值 HSV</dt><dd id="popover-hsv">—</dd>
+                                <dt>均值 RGB</dt><dd id="popover-rgb">—</dd>
+                                <dt>当前判定</dt><dd id="popover-predicted">—</dd>
+                                <dt>已纠正</dt><dd id="popover-corrected">未纠正</dd>
+                            </dl>
+                            <div class="popover-actions" role="group" aria-label="指定真实类别">
+                                <button type="button" class="btn popover-label-btn btn-label-cloud" data-label="CLOUD">云层</button>
+                                <button type="button" class="btn popover-label-btn btn-label-blue" data-label="BLUE_WATER">蓝海</button>
+                                <button type="button" class="btn popover-label-btn btn-label-yellow" data-label="YELLOW_WATER">黄海</button>
+                                <button type="button" class="btn popover-label-btn btn-label-ignore" data-label="IGNORE">忽略</button>
+                            </div>
+                            <div class="popover-foot">
+                                <button type="button" class="btn btn-sm" id="btn-cancel-correction" hidden>取消纠正</button>
+                                <p class="popover-note">
+                                    快捷键 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> 标注 · <kbd>Esc</kbd> 关闭<br>
+                                    标注会作为自动优化的训练样本
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </figure>
+            </div>
+
+            <div class="correction-foot">
+                <p id="correction-hint" class="preview-hint" data-tone="muted" aria-live="polite">请先在「1 · 导入卫星图片」中导入并选择图片。</p>
+                <button type="button" class="btn btn-sm" id="btn-repreview" disabled>重新预览</button>
+            </div>
+            <ul class="legend" aria-label="描边图例">
+                <li><i class="c-match" aria-hidden="true"></i>绿色描边 = 当前判定与纠正一致</li>
+                <li><i class="c-miss" aria-hidden="true"></i>橙色描边 = 不一致（优化目标）</li>
+                <li><i class="c-ignore" aria-hidden="true"></i>灰色描边 = 已标记为忽略</li>
+            </ul>
+
+            <div class="chip-row">
+                <div class="corr-chips" id="correction-chips"></div>
+                <div class="chip-actions" id="correction-actions" hidden>
+                    <button type="button" class="btn btn-sm btn-danger-ghost" id="btn-clear-corrections">清空本图纠正</button>
+                </div>
+            </div>
+
+            <div class="optimize">
+                <div class="optimize-head">
+                    <label class="opt-switch" for="auto-optimize">
+                        <input type="checkbox" id="auto-optimize" checked>
+                        标注后自动优化参数
+                    </label>
+                    <button type="button" class="btn btn-sm" id="btn-optimize">立即优化</button>
+                    <span class="optimize-status" id="optimize-status" role="status" aria-live="polite"></span>
+                </div>
+                <div class="opt-panel" id="opt-panel" hidden>
+                    <div class="opt-accuracy">
+                        <div class="opt-acc"><span>当前准确率</span><b id="opt-before">—</b></div>
+                        <span class="opt-arrow" aria-hidden="true">→</span>
+                        <div class="opt-acc is-after"><span>建议准确率</span><b id="opt-after">—</b></div>
+                        <span class="opt-delta" id="opt-delta"></span>
+                    </div>
+                    <p class="opt-message" id="opt-message"></p>
+                    <div class="opt-stats" id="opt-stats"></div>
+                    <div class="diff-table-wrap" id="opt-diffs"></div>
+                    <div class="opt-actions">
+                        <button type="button" class="btn btn-primary" id="btn-apply-suggested" disabled>应用建议值并预览</button>
+                        <span class="opt-actions-note">应用只会填入左侧面板并重新预览；点「保存并立即生效」才会写入数据库。</span>
+                    </div>
+                </div>
             </div>
         </section>
 
         <section class="card" aria-label="分析指标">
             <div class="card-head">
                 <div class="card-heading">
-                    <h2>分析指标</h2>
-                    <p class="card-sub">随预览实时更新；显示为 “—” 表示该指标在当前预览源上未计算。</p>
+                    <h2>3 · 分析指标</h2>
+                    <p class="card-sub">随预览实时更新；显示为 “—” 表示当前图片没有该指标（如无纠正样本时的纠正符合率）。</p>
                 </div>
             </div>
             <div class="metrics-grid is-empty" id="metrics">
@@ -1265,9 +1535,21 @@
                     <span class="metric-hint">cloudPixels</span>
                 </div>
                 <div class="metric" data-tone="sea">
-                    <span class="metric-label">海洋总像素</span>
+                    <span class="metric-label">分析像素</span>
                     <span class="metric-value" id="m-ocean">—</span>
-                    <span class="metric-hint">totalOceanPixels</span>
+                    <span class="metric-hint" id="m-ocean-hint">totalOceanPixels</span>
+                </div>
+                <div class="metric" data-tone="ok">
+                    <span class="metric-label">纠正符合率</span>
+                    <span class="metric-value" id="m-accuracy">—</span>
+                    <span class="metric-hint" id="m-accuracy-hint">correctionAccuracy</span>
+                    <span class="metric-bar" aria-hidden="true"><i id="bar-accuracy"></i></span>
+                </div>
+                <div class="metric" data-tone="warn">
+                    <span class="metric-label">忽略占比</span>
+                    <span class="metric-value" id="m-ignored">—</span>
+                    <span class="metric-hint" id="m-ignored-hint">ignoredRatio</span>
+                    <span class="metric-bar" aria-hidden="true"><i id="bar-ignored"></i></span>
                 </div>
             </div>
         </section>
@@ -1281,60 +1563,110 @@
     'use strict';
 
     /* =====================================================================
-       服务端注入的初始快照（可选）。仅用于首屏快速渲染，页面启动后仍会从
-       GET /tools/api/color_thresholds 拉取权威状态；缺失时安全退化为纯前端拉取。
+       服务端注入的初始快照（可选）：仅用于首屏快速渲染阈值表单。
+       页面启动后仍会从 GET /tools/api/color_thresholds 拉取权威状态。
        ===================================================================== */
     var BOOTSTRAP = ({{ bootstrap_state | tojson }});
     var CLASS_DEFS = {{ class_defs | tojson }};
 
-    var API_STATE = '/tools/api/color_thresholds';
-    var API_RESET = '/tools/api/color_thresholds/reset';
-    var API_SOURCES = '/tools/api/preview_sources';
-    var API_TAGS = '/tools/api/preview_tags';
-    var API_PREVIEW = '/tools/api/threshold_preview';
+    var API = '/tools/api/color_thresholds';
+    var API_RESET = API + '/reset';
+    var API_LAB = API + '/lab';
+    var API_IMAGES = API + '/images';
+    var API_IMAGES_CLEAR = API + '/images/clear';
+    var API_PREVIEW = API + '/preview';
+    var API_BLOCK = API + '/block';
+    var API_CORRECTIONS = API + '/corrections';
+    var API_CORRECTIONS_CLEAR = API + '/corrections/clear';
+    var API_OPTIMIZE = API + '/optimize';
 
     var DEBOUNCE_MS = 180;
-    var MAX_TAGS = 20;
-    var MAX_TAG_LENGTH = 24;
     var BOUND_FALLBACK = { H: [0, 179], S: [0, 255], V: [0, 255] };
     var CH_INDEX = { H: 0, S: 1, V: 2 };
     var BOUND_CN = { lower: '下限', upper: '上限' };
+    var LABEL_FALLBACK = [
+        { key: 'CLOUD', label: '云层' },
+        { key: 'BLUE_WATER', label: '蓝海' },
+        { key: 'YELLOW_WATER', label: '黄海' },
+        { key: 'IGNORE', label: '忽略' }
+    ];
+    var LABEL_TONE = {
+        CLOUD: '#7d8fa3',
+        BLUE_WATER: '#1f7ae0',
+        YELLOW_WATER: '#d9a520',
+        IGNORE: '#8a939e'
+    };
+    var LABEL_SHORTCUT = { CLOUD: '1', BLUE_WATER: '2', YELLOW_WATER: '3', IGNORE: '4' };
+    var SHORTCUT_LABEL = { '1': 'CLOUD', '2': 'BLUE_WATER', '3': 'YELLOW_WATER', '4': 'IGNORE' };
+    var DEFAULT_ALLOWED_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'];
+    var DEFAULT_LIMITS = {
+        max_images: 60,
+        max_upload_bytes: 62914560,
+        max_side: 1600,
+        zip_max_entries: 120,
+        allowed_ext: DEFAULT_ALLOWED_EXT.slice()
+    };
 
     /* ---------------- 运行时状态 ---------------- */
-    var model = emptyModel();          // 当前表单值（NaN 表示非法输入）
-    var savedRanges = null;            // 与数据库一致的基准（脏标记用）
-    var defaultsRanges = null;         // 内置默认值
+    var model = emptyModel();               // 阈值表单值（NaN 表示非法输入）
+    var savedRanges = null;                 // 与数据库一致的基准（脏标记用）
+    var defaultsRanges = null;              // 内置默认值
     var bounds = { H: [0, 179], S: [0, 255], V: [0, 255] };
-    var effectiveSource = 'default';   // 'db' | 'default'
+    var effectiveSource = 'default';        // 'db' | 'default'
     var updatedAt = null;
-    var stateLoaded = false;           // 权威状态是否已就绪（决定能否保存）
-    var touched = false;               // 用户是否已手动改过表单
-    var baselineApplied = false;       // 表单是否已经用「真实基准」填充过（防止用空模型覆盖/保存）
+    var stateLoaded = false;                // 权威阈值是否已就绪
+    var touched = false;                    // 用户是否手动改过表单
+    var baselineApplied = false;            // 表单是否已用真实基准填充
     var saving = false;
-    var currentSource = '';            // 当前选中的 analysis:<ts>
-    var currentTimestamp = null;       // 当前选中时间点的 epoch 秒
-    var sources = [];                  // 规范化后的可用分析时间点（按时间倒序）
-    var sourcesTotal = 0;              // 服务端给出的真实可用时间点总数
-    var sourcesTruncated = false;      // 服务端是否只返回了最新 N 个
-    var tagCounts = [];                // [{tag, count}]
-    var tagPresets = [];               // [{tag}] 预设标签（纯字符串数组）
-    var activeTagFilter = '';          // '' = 全部；否则按该 tag 过滤
-    var savedTags = [];                // 当前时间点已保存的 tag（编辑基准）
-    var currentTags = [];              // 当前时间点编辑中的 tag
-    var tagsSaving = false;
-    var sourcesLoading = false;
-    var sourcesSeq = 0;                // 源列表请求序号，防止旧响应覆盖新列表
-    var firstPreview = true;           // 首次预览传 ranges=null，让服务端使用已保存配置
-    var previewRequested = false;      // 是否已用表单值请求过预览
-    var seq = 0;                       // 预览请求序号，防止旧响应覆盖新结果
-    var inflight = null;               // 当前预览请求的 AbortController
+
+    var lab = {                             // 图片实验台状态
+        images: [],
+        limits: cloneLimits(DEFAULT_LIMITS),
+        labels: LABEL_FALLBACK.slice(),
+        correctionsTotal: 0
+    };
+    var labLoaded = false;
+    var labSeq = 0;
+    var currentImageId = '';
+    var correctionsByImage = Object.create(null);   // image_id -> corrections[]
+    var selectedBlock = null;               // 当前选中的色块（/block 返回）
+    var blockBusy = false;
+    var correcting = false;
+    var importing = false;
+    var clearLoading = false;
+    var importState = { total: 0, done: 0, current: '' };
+    var importSummary = null;               // {imported, skipped, truncated}
+    var skippedDetails = [];
+    var skipExpanded = false;
+
+    var lastOptimize = null;
+    var optimizeBusy = false;
+    var applyBusy = false;
+
+    var previewState = { width: null, height: null, fullWidth: null, fullHeight: null, analysis: null };
+    var firstPreview = true;
+    var previewSeq = 0;
+    var previewInflight = null;
     var debounceId = null;
+
     var toastTimer = null;
 
     /* ---------------- 基础工具 ---------------- */
     function $(id) { return document.getElementById(id); }
     function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
     function isNum(value) { return typeof value === 'number' && isFinite(value); }
+    function isFiniteNumber(value) { return typeof value === 'number' && isFinite(value); }
+
+    function cloneLimits(source) {
+        var base = source || DEFAULT_LIMITS;
+        return {
+            max_images: base.max_images,
+            max_upload_bytes: base.max_upload_bytes,
+            max_side: base.max_side,
+            zip_max_entries: base.zip_max_entries,
+            allowed_ext: base.allowed_ext.slice()
+        };
+    }
 
     function channelBounds(ch) {
         var pair = bounds && bounds[ch];
@@ -1386,10 +1718,15 @@
         return Boolean(savedRanges) && rangesKey(model) !== rangesKey(savedRanges);
     }
 
-    function labelFor(key) {
-        var def = CLASS_DEFS.filter(function (item) { return item.key === key; })[0];
-        return def ? def.label : key;
+    function labelCn(key) {
+        if (key === null || key === undefined || key === '') return '—';
+        var found = (lab.labels || []).filter(function (item) { return item && item.key === key; })[0];
+        if (found && found.label) return String(found.label);
+        var fallback = LABEL_FALLBACK.filter(function (item) { return item.key === key; })[0];
+        return fallback ? fallback.label : String(key);
     }
+
+    function labelColor(key) { return LABEL_TONE[key] || '#8a939e'; }
 
     function clockNow() {
         var now = new Date();
@@ -1406,6 +1743,14 @@
         } catch (error) {
             return date.toISOString();
         }
+    }
+
+    function formatBytes(bytes) {
+        var n = Number(bytes);
+        if (!isFinite(n) || n <= 0) return '—';
+        if (n >= 1024 * 1024) return Math.round(n / (1024 * 1024)) + ' MB';
+        if (n >= 1024) return Math.round(n / 1024) + ' KB';
+        return Math.round(n) + ' B';
     }
 
     function hsvToCss(h, s, v) {
@@ -1425,6 +1770,26 @@
         else { r = c; g = 0; b = x; }
         function toByte(n) { return Math.round((n + m) * 255); }
         return 'rgb(' + toByte(r) + ', ' + toByte(g) + ', ' + toByte(b) + ')';
+    }
+
+    function percentText(value, digits) {
+        if (!isNum(value)) return '—';
+        var d = (digits === undefined || digits === null) ? 1 : digits;
+        return (value * 100).toFixed(d) + '%';
+    }
+
+    function countText(value) {
+        if (!isNum(value)) return '—';
+        return Math.round(value).toLocaleString('zh-CN');
+    }
+
+    function roundTo(value, digits) {
+        var factor = Math.pow(10, digits);
+        return Math.round(value * factor) / factor;
+    }
+
+    function errorMessage(error) {
+        return (error && error.message) ? String(error.message) : '未知错误';
     }
 
     /* ---------------- 提示与错误 ---------------- */
@@ -1475,11 +1840,12 @@
 
     function reportError(title, error, kind) {
         showAlert(title, error, kind);
-        showToast(title + '：' + ((error && error.message) ? error.message : '未知错误'), 'error');
+        showToast(title + '：' + errorMessage(error), 'error');
     }
 
     function setHint(text, tone) {
-        var hint = $('preview-hint');
+        var hint = $('correction-hint');
+        if (!hint) return;
         hint.textContent = text;
         hint.dataset.tone = tone || 'muted';
     }
@@ -1488,15 +1854,40 @@
         $('save-note').textContent = text;
     }
 
+    function setText(id, text) {
+        var el = $(id);
+        if (el) el.textContent = text;
+    }
+
+    function setBadge(id, text) {
+        var el = $(id);
+        if (el) el.textContent = text;
+    }
+
+    function setBar(id, ratio) {
+        var el = $(id);
+        if (!el) return;
+        var percent = isNum(ratio) ? clamp(ratio * 100, 0, 100) : 0;
+        el.style.width = percent.toFixed(1) + '%';
+    }
+
     /* ---------------- 网络层 ---------------- */
-    async function api(url, options) {
-        var init = Object.assign({ method: 'GET' }, options || {});
+    async function requestApi(url, options) {
+        var opts = options || {};
+        var init = { method: opts.method || 'GET', signal: opts.signal };
         var headers = { 'Accept': 'application/json' };
-        if (init.body !== undefined && init.body !== null) headers['Content-Type'] = 'application/json';
+        if (opts.json !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            init.body = JSON.stringify(opts.json);
+        } else if (opts.body !== undefined) {
+            headers['Content-Type'] = opts.contentType || 'application/octet-stream';
+            init.body = opts.body;
+        }
         init.headers = headers;
 
         var response = await fetch(url, init);
-        var text = await response.text();
+        var text = '';
+        try { text = await response.text(); } catch (error) { text = ''; }
         var payload = null;
         if (text) {
             try { payload = JSON.parse(text); } catch (error) { payload = null; }
@@ -1510,7 +1901,10 @@
         return payload.data;
     }
 
-    /* ---------------- 表单渲染 ---------------- */
+    /* =====================================================================
+       一、左侧：HSV 阈值表单（沿用原有严格校验 / dirty / 保存逻辑）
+       ===================================================================== */
+
     function updateRangeFill(input, min, max) {
         if (!input) return;
         var value = Number(input.value);
@@ -1602,7 +1996,6 @@
         });
     }
 
-    /* ---------------- 校验 ---------------- */
     function validateModel() {
         var errors = [];
         CLASS_DEFS.forEach(function (def) {
@@ -1671,7 +2064,6 @@
         if (typeof target.select === 'function') target.select();
     }
 
-    /* ---------------- 元信息（来源 / 时间 / 脏标记） ---------------- */
     function renderMetaChips() {
         var chip = $('source-chip');
         chip.dataset.source = effectiveSource;
@@ -1693,15 +2085,13 @@
     }
 
     function updateDirty() {
-        var dirty = isDirty();
-        $('dirty-badge').hidden = !dirty;
+        $('dirty-badge').hidden = !isDirty();
     }
 
     function syncSaveButton(errors) {
         var list = errors || validateModel();
         var saveBtn = $('btn-save');
         var dirty = isDirty();
-        // 没有未保存的修改时保存按钮保持禁用（首屏回填真实阈值后即为该状态）。
         saveBtn.disabled = saving || !stateLoaded || list.length > 0 || !dirty;
         saveBtn.classList.toggle('is-armed', dirty && saveBtn.disabled === false);
         if (!stateLoaded) saveBtn.title = '正在读取服务器中的阈值配置…';
@@ -1724,10 +2114,10 @@
         var errors = updateValidation();
         updateDirty();
         syncSaveButton(errors);
+        syncControls();
         schedulePreview();
     }
 
-    /* ---------------- 状态读取/应用 ---------------- */
     function applyState(data) {
         if (!data || typeof data !== 'object') return false;
         defaultsRanges = normalizeRanges(data.defaults || data.ranges);
@@ -1761,11 +2151,8 @@
         if (!applyState(data)) return false;
         stateLoaded = true;
         applyBoundsToControls();
-        // 关键：applyState 只更新了 savedRanges / defaultsRanges / bounds / 元信息，
-        // 必须把「真实基准」复制进表单模型后再绘制，否则滑块会停在空模型的 0 上，
-        // 既会误显示 dirty，也可能把 0 阈值保存进数据库。
-        // 若用户真实基准尚未填充过（页面打开后、GET 返回前就拖了滑块），
-        // 这里也强制用基准覆盖，避免把半套 0 值留在表单里被保存。
+        // 关键：applyState 只更新基准/元信息，必须把真实基准复制进表单模型后再绘制，
+        // 否则滑块会停在空模型的 0 上，既会误显示 dirty，也可能把 0 阈值保存进数据库。
         if (paintForm || !baselineApplied) {
             model = normalizeRanges(savedRanges, defaultsRanges);
             paintModel();
@@ -1775,21 +2162,20 @@
         var errors = updateValidation();
         updateDirty();
         syncSaveButton(errors);
+        syncControls();
         return true;
     }
 
     async function loadState() {
         try {
-            var data = await api(API_STATE);
+            var data = await requestApi(API);
             adoptState(data, !touched);
-            if (previewRequested) requestPreview();   // 若用户已抢先触发预览，状态就绪后用新值重跑
             return true;
         } catch (error) {
             // 若服务端已在模板里注入快照，仍把它当作基准继续；否则保存按钮保持禁用。
             if (savedRanges) {
                 stateLoaded = true;
                 if (!baselineApplied) {
-                    // 兜底：确保表单拿到基准值，绝不把空模型当成当前阈值。
                     model = normalizeRanges(savedRanges, defaultsRanges);
                     paintModel();
                     baselineApplied = true;
@@ -1804,715 +2190,6 @@
         }
     }
 
-    /* ---------------- 预览源：分析时间点 / 标签 ---------------- */
-    function findSource(sourceId) {
-        if (!sourceId) return null;
-        return sources.filter(function (item) { return item.id === sourceId; })[0] || null;
-    }
-
-    function findSourceByTimestamp(timestamp) {
-        return sources.filter(function (item) { return item.timestamp === timestamp; })[0] || null;
-    }
-
-    function currentSourceLabel() {
-        var source = findSource(currentSource);
-        return source ? source.label : '';
-    }
-
-    function pad2(value) {
-        return value < 10 ? '0' + value : String(value);
-    }
-
-    // ISO8601 -> <input type="datetime-local"> 需要的浏览器本地时间字符串
-    function toDatetimeLocalValue(iso) {
-        var date = new Date(iso);
-        if (isNaN(date.getTime())) return '';
-        return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
-            'T' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
-    }
-
-    function formatLocalLabel(timestamp) {
-        var date = new Date(timestamp * 1000);
-        return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
-            ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
-    }
-
-    function normalizeSource(raw) {
-        if (!raw || raw.id === null || raw.id === undefined) return null;
-        var id = String(raw.id);
-        var timestamp = Number(raw.timestamp);
-        if (!isFinite(timestamp)) {
-            var matched = /^analysis:(\d+)$/.exec(id);
-            if (!matched) return null;
-            timestamp = Number(matched[1]);
-        }
-        var datetime = raw.datetime ? String(raw.datetime) : new Date(timestamp * 1000).toISOString();
-        var label = raw.label ? String(raw.label) : formatLocalLabel(timestamp);
-        var tags = Array.isArray(raw.tags) ? raw.tags.map(function (tag) { return String(tag); }) : [];
-        return { id: id, timestamp: timestamp, datetime: datetime, label: label, tags: tags };
-    }
-
-    function normalizeTagCounts(raw) {
-        if (!Array.isArray(raw)) return [];
-        return raw.filter(function (item) {
-            return item && item.tag !== undefined && item.tag !== null;
-        }).map(function (item) {
-            return { tag: String(item.tag), count: Number(item.count) || 0 };
-        });
-    }
-
-    function filteredSources() {
-        if (!activeTagFilter) return sources;
-        return sources.filter(function (item) { return item.tags.indexOf(activeTagFilter) !== -1; });
-    }
-
-    function syncDatetimeInput() {
-        var source = findSource(currentSource);
-        $('source-datetime').value = source ? toDatetimeLocalValue(source.datetime) : '';
-    }
-
-    function setDtHint(text, tone) {
-        var el = $('dt-hint');
-        el.textContent = text;
-        el.dataset.tone = tone || 'muted';
-    }
-
-    function clearSuggestions() {
-        var wrap = $('dt-suggestions');
-        wrap.hidden = true;
-        wrap.replaceChildren();
-    }
-
-    function renderSuggestions(list) {
-        var wrap = $('dt-suggestions');
-        var fragment = document.createDocumentFragment();
-        list.forEach(function (source) {
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'dt-suggestion';
-            button.dataset.sourceId = source.id;
-            button.textContent = source.label;
-            fragment.appendChild(button);
-        });
-        wrap.replaceChildren(fragment);
-        wrap.hidden = list.length === 0;
-    }
-
-    function nearestSources(timestamp, limit) {
-        return sources.slice().sort(function (a, b) {
-            return Math.abs(a.timestamp - timestamp) - Math.abs(b.timestamp - timestamp);
-        }).slice(0, limit);
-    }
-
-    function renderSourceMeta() {
-        var filteredCount = filteredSources().length;
-        $('source-total').textContent = '共 ' + sourcesTotal + ' 个可用时间点' +
-            (activeTagFilter ? ' · 当前显示 ' + filteredCount + ' 个' : '');
-        var source = findSource(currentSource);
-        $('source-current').textContent = source ? ('当前选中：' + source.label) : '当前选中：—';
-        var truncated = $('source-truncated');
-        truncated.hidden = !sourcesTruncated;
-        if (sourcesTruncated) {
-            truncated.textContent = '共 ' + sourcesTotal + ' 个可用时间点，仅展示最新 ' + sources.length + ' 个';
-        }
-    }
-
-    function renderTagFilter() {
-        var wrap = $('tag-filter');
-        var fragment = document.createDocumentFragment();
-        function buildChip(label, count, active, filterValue) {
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'tag-filter-chip' + (active ? ' is-active' : '');
-            button.dataset.filterTag = filterValue;
-            button.setAttribute('aria-pressed', active ? 'true' : 'false');
-            button.textContent = label;
-            if (count !== null) {
-                var countEl = document.createElement('span');
-                countEl.className = 'tag-filter-count';
-                countEl.textContent = String(count);
-                button.appendChild(countEl);
-            }
-            return button;
-        }
-        fragment.appendChild(buildChip('全部', null, !activeTagFilter, ''));
-        tagCounts.forEach(function (item) {
-            fragment.appendChild(buildChip(item.tag, item.count, activeTagFilter === item.tag, item.tag));
-        });
-        wrap.replaceChildren(fragment);
-    }
-
-    function renderSourceList() {
-        var list = $('source-list');
-        var items = filteredSources();
-        var fragment = document.createDocumentFragment();
-        items.forEach(function (source) {
-            var selected = source.id === currentSource;
-            var li = document.createElement('li');
-            li.className = 'source-item' + (selected ? ' is-selected' : '');
-            li.setAttribute('role', 'option');
-            li.setAttribute('tabindex', '0');
-            li.setAttribute('aria-selected', selected ? 'true' : 'false');
-            if (selected) li.setAttribute('aria-current', 'true');
-            li.dataset.sourceId = source.id;
-
-            var time = document.createElement('span');
-            time.className = 'source-item-time';
-            time.textContent = source.label;
-            li.appendChild(time);
-
-            var tagsWrap = document.createElement('span');
-            tagsWrap.className = 'source-item-tags';
-            if (source.tags.length) {
-                source.tags.forEach(function (tag) {
-                    var chip = document.createElement('span');
-                    chip.className = 'source-tag-chip';
-                    chip.textContent = tag;
-                    tagsWrap.appendChild(chip);
-                });
-            } else {
-                var none = document.createElement('span');
-                none.className = 'source-tag-none';
-                none.textContent = '未打标签';
-                tagsWrap.appendChild(none);
-            }
-            li.appendChild(tagsWrap);
-            fragment.appendChild(li);
-        });
-        list.replaceChildren(fragment);
-
-        var empty = $('source-list-empty');
-        empty.hidden = items.length > 0;
-        if (!items.length) {
-            empty.textContent = activeTagFilter ? ('没有该 tag 的时间点：' + activeTagFilter) : '没有可选的时间点';
-        }
-    }
-
-    function syncSourceControls() {
-        var hasSources = sources.length > 0;
-        var hasCurrent = Boolean(findSource(currentSource));
-        var locked = sourcesLoading;
-        $('source-datetime').disabled = !hasSources || locked;
-        $('btn-pick-datetime').disabled = !hasSources || locked;
-        $('btn-refresh-sources').disabled = locked || tagsSaving;
-        $('btn-rerun').disabled = !hasCurrent || locked;
-        $('tag-input').disabled = !hasCurrent || tagsSaving;
-        $('btn-add-tag').disabled = !hasCurrent || tagsSaving;
-        var errors = tagValidationErrors();
-        $('btn-save-tags').disabled = !hasCurrent || tagsSaving || !isTagDirty() || errors.length > 0;
-        $('btn-save-tags').textContent = tagsSaving ? '保存中…' : '保存标签';
-        $('source-list-wrap').setAttribute('aria-busy', locked ? 'true' : 'false');
-    }
-
-    function renderSourceUi() {
-        renderSourceMeta();
-        renderTagFilter();
-        renderSourceList();
-        syncSourceControls();
-    }
-
-    function applySourcesPayload(data, options) {
-        var opts = options || {};
-        var rawSources = (data && Array.isArray(data.sources)) ? data.sources : [];
-        sources = rawSources.map(normalizeSource).filter(Boolean).sort(function (a, b) {
-            return b.timestamp - a.timestamp;
-        });
-        sourcesTotal = (data && isNum(Number(data.total))) ? Number(data.total) : sources.length;
-        sourcesTruncated = Boolean(data && data.truncated);
-        tagCounts = normalizeTagCounts(data && data.tags);
-        if (data && Array.isArray(data.presets)) tagPresets = data.presets.map(String);
-        if (activeTagFilter && !tagCounts.some(function (item) { return item.tag === activeTagFilter; })) {
-            activeTagFilter = '';
-        }
-
-        var kept = opts.preserveSelection ? findSource(currentSource) : null;
-        var preferred = (data && data.default !== null && data.default !== undefined)
-            ? findSource(String(data.default)) : null;
-        var chosen = kept || preferred || sources[0] || null;
-
-        if (chosen) {
-            currentSource = chosen.id;
-            currentTimestamp = chosen.timestamp;
-            savedTags = chosen.tags.slice();
-            currentTags = chosen.tags.slice();
-        } else {
-            currentSource = '';
-            currentTimestamp = null;
-            savedTags = [];
-            currentTags = [];
-        }
-        syncDatetimeInput();
-        clearSuggestions();
-        renderSourceUi();
-        renderTagEditor();
-        if (sources.length) {
-            setDtHint('已载入 ' + sources.length + ' 个可用时间点；可点选下方列表，或按日期时间检索', 'muted');
-        }
-    }
-
-    async function loadSources(options) {
-        var opts = options || {};
-        var requestSeq = ++sourcesSeq;
-        sourcesLoading = true;
-        syncSourceControls();
-        try {
-            var data = await api(API_SOURCES);
-            if (requestSeq !== sourcesSeq) return false;
-            applySourcesPayload(data, opts);
-            clearAlert('sources');
-            return true;
-        } catch (error) {
-            if (requestSeq !== sourcesSeq) return false;
-            sources = [];
-            sourcesTotal = 0;
-            sourcesTruncated = false;
-            tagCounts = [];
-            currentSource = '';
-            currentTimestamp = null;
-            savedTags = [];
-            currentTags = [];
-            activeTagFilter = '';
-            $('source-datetime').value = '';
-            clearSuggestions();
-            renderSourceUi();
-            renderTagEditor();
-            setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
-            setDtHint('可用时间点读取失败', 'error');
-            reportError('无法读取预览源列表', error, 'sources');
-            return false;
-        } finally {
-            if (requestSeq === sourcesSeq) {
-                sourcesLoading = false;
-                syncSourceControls();
-            }
-        }
-    }
-
-    async function refreshSources() {
-        if (isTagDirty() && !window.confirm('当前时间点有未保存的标签修改，刷新列表将放弃这些修改。确定继续吗？')) return;
-        try {
-            var ok = await loadSources({ preserveSelection: true });
-            if (ok && currentSource) {
-                firstPreview = false;
-                requestPreview();
-            }
-        } finally {
-            syncSourceControls();
-        }
-    }
-
-    function selectSource(sourceId, options) {
-        var opts = options || {};
-        var source = findSource(String(sourceId));
-        if (!source) return false;
-        if (source.id === currentSource) {
-            syncDatetimeInput();
-            return true;
-        }
-        if (isTagDirty() && !opts.skipConfirm) {
-            if (!window.confirm('当前时间点有未保存的标签修改，切换后将放弃这些修改。确定继续吗？')) {
-                renderSourceList();
-                return false;
-            }
-        }
-        currentSource = source.id;
-        currentTimestamp = source.timestamp;
-        savedTags = source.tags.slice();
-        currentTags = source.tags.slice();
-        // 若当前正按某个 tag 过滤、而选中的时间点不匹配该 tag，自动回到「全部」：
-        // 用户通过日期时间检索或「最近可用」建议明确选中了某个时间点时，该行必须在列表里可见。
-        if (activeTagFilter && !source.tags.includes(activeTagFilter)) {
-            activeTagFilter = '';
-            renderTagFilter();
-        }
-        syncDatetimeInput();
-        clearSuggestions();
-        renderSourceUi();
-        renderTagEditor();
-        if (opts.preview !== false) {
-            firstPreview = false;
-            requestPreview();
-        }
-        return true;
-    }
-
-    function setTagFilter(tag) {
-        activeTagFilter = tag || '';
-        renderTagFilter();
-        renderSourceList();
-        renderSourceMeta();
-        if (!activeTagFilter) return;
-        var matches = filteredSources();
-        if (!matches.length) return;
-        var currentVisible = matches.some(function (item) { return item.id === currentSource; });
-        if (!currentVisible) selectSource(matches[0].id, {});
-    }
-
-    function pickDatetime() {
-        var input = $('source-datetime');
-        var raw = input.value ? input.value.trim() : '';
-        if (!raw) {
-            clearSuggestions();
-            setDtHint('请选择日期时间（按浏览器本地时区）', 'warn');
-            return false;
-        }
-        var date = new Date(raw);
-        if (isNaN(date.getTime())) {
-            clearSuggestions();
-            setDtHint('日期时间格式不合法，请重新选择', 'warn');
-            return false;
-        }
-        if (!sources.length) {
-            clearSuggestions();
-            setDtHint('没有可用的分析时间点', 'error');
-            return false;
-        }
-        var timestamp = Math.floor(date.getTime() / 1000);
-        var exact = findSourceByTimestamp(timestamp);
-        if (exact) {
-            clearSuggestions();
-            setDtHint('已选用该时间点的分析结果', 'ok');
-            selectSource(exact.id, {});
-            return true;
-        }
-        setDtHint('该时间没有分析结果，最近可用：', 'warn');
-        renderSuggestions(nearestSources(timestamp, 3));
-        return false;
-    }
-
-    /* ---------------- 时间点标签编辑 ---------------- */
-    function tagsKey(list) {
-        return list.join('\u0000');
-    }
-
-    function isTagDirty() {
-        return Boolean(findSource(currentSource)) && tagsKey(currentTags) !== tagsKey(savedTags);
-    }
-
-    function tagValidationErrors() {
-        var errors = [];
-        if (!findSource(currentSource)) return errors;
-        if (currentTags.length > MAX_TAGS) {
-            errors.push('最多只能打 ' + MAX_TAGS + ' 个标签（当前 ' + currentTags.length + ' 个）');
-        }
-        currentTags.forEach(function (tag) {
-            if (tag.length < 1 || tag.length > MAX_TAG_LENGTH) {
-                errors.push('标签「' + tag + '」长度需为 1–' + MAX_TAG_LENGTH + ' 个字符');
-            }
-        });
-        return errors;
-    }
-
-    function setTagValidation(errors) {
-        var el = $('tag-validation');
-        if (!errors || !errors.length) {
-            el.hidden = true;
-            el.textContent = '';
-        } else {
-            el.hidden = false;
-            el.textContent = errors.join('；');
-        }
-    }
-
-    function updateTagDirtyBadge() {
-        $('tag-dirty').hidden = !isTagDirty();
-    }
-
-    function renderTagPresets() {
-        var wrap = $('tag-presets');
-        var hasCurrent = Boolean(findSource(currentSource));
-        if (!tagPresets.length) {
-            wrap.hidden = true;
-            wrap.replaceChildren();
-            return;
-        }
-        wrap.hidden = false;
-        var fragment = document.createDocumentFragment();
-        tagPresets.forEach(function (tag) {
-            var exists = currentTags.indexOf(tag) !== -1;
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'tag-preset';
-            button.dataset.addTag = tag;
-            button.disabled = !hasCurrent || exists || tagsSaving;
-            button.textContent = tag;
-            button.title = exists ? '该标签已存在' : ('添加预设标签：' + tag);
-            fragment.appendChild(button);
-        });
-        wrap.replaceChildren(fragment);
-    }
-
-    function renderTagDatalist() {
-        var datalist = $('tag-suggestions');
-        var seen = {};
-        var fragment = document.createDocumentFragment();
-        tagPresets.concat(tagCounts.map(function (item) { return item.tag; })).forEach(function (tag) {
-            if (!tag || seen[tag]) return;
-            seen[tag] = true;
-            var option = document.createElement('option');
-            option.value = tag;
-            fragment.appendChild(option);
-        });
-        datalist.replaceChildren(fragment);
-    }
-
-    function renderTagEditor() {
-        var source = findSource(currentSource);
-        var chips = $('tag-current-chips');
-        var empty = $('tag-current-empty');
-        var dtBadge = $('tag-current-dt');
-
-        if (!source) {
-            chips.replaceChildren();
-            empty.hidden = false;
-            empty.textContent = sources.length
-                ? '请先在上方选择一个时间点。'
-                : '没有可用的时间点，无法编辑标签。';
-            dtBadge.textContent = '未选择时间点';
-        } else {
-            var fragment = document.createDocumentFragment();
-            if (currentTags.length) {
-                empty.hidden = true;
-                currentTags.forEach(function (tag) {
-                    var chip = document.createElement('span');
-                    chip.className = 'tag-chip';
-                    var text = document.createElement('span');
-                    text.textContent = tag;
-                    chip.appendChild(text);
-                    var remove = document.createElement('button');
-                    remove.type = 'button';
-                    remove.className = 'tag-chip-remove';
-                    remove.dataset.removeTag = tag;
-                    remove.setAttribute('aria-label', '移除标签 ' + tag);
-                    remove.textContent = '×';
-                    chip.appendChild(remove);
-                    fragment.appendChild(chip);
-                });
-            } else {
-                empty.hidden = false;
-                empty.textContent = '该时间点还没有标签。';
-            }
-            chips.replaceChildren(fragment);
-            dtBadge.textContent = source.label;
-        }
-
-        renderTagPresets();
-        renderTagDatalist();
-        setTagValidation(tagValidationErrors());
-        updateTagDirtyBadge();
-        syncSourceControls();
-    }
-
-    function addTag(rawValue) {
-        if (!findSource(currentSource)) {
-            showToast('请先选择一个时间点', 'warn');
-            return false;
-        }
-        var tag = String(rawValue === null || rawValue === undefined ? '' : rawValue).trim();
-        if (!tag) {
-            setTagValidation(['标签不能为空（去除首尾空格后）']);
-            return false;
-        }
-        if (tag.length > MAX_TAG_LENGTH) {
-            setTagValidation(['标签长度需为 1–' + MAX_TAG_LENGTH + ' 个字符']);
-            return false;
-        }
-        if (currentTags.indexOf(tag) !== -1) {
-            setTagValidation(['标签「' + tag + '」已存在，已自动忽略']);
-            return false;
-        }
-        if (currentTags.length >= MAX_TAGS) {
-            setTagValidation(['最多只能打 ' + MAX_TAGS + ' 个标签']);
-            return false;
-        }
-        currentTags.push(tag);
-        renderTagEditor();
-        return true;
-    }
-
-    function removeTag(tag) {
-        var index = currentTags.indexOf(tag);
-        if (index === -1) return false;
-        currentTags.splice(index, 1);
-        renderTagEditor();
-        return true;
-    }
-
-    function addTagFromInput() {
-        var input = $('tag-input');
-        if (!findSource(currentSource)) {
-            showToast('请先选择一个时间点', 'warn');
-            return;
-        }
-        if (addTag(input.value)) {
-            input.value = '';
-            if (typeof input.focus === 'function') input.focus();
-        }
-    }
-
-    async function saveTags() {
-        var source = findSource(currentSource);
-        if (!source || tagsSaving) return false;
-        var errors = tagValidationErrors();
-        if (errors.length) {
-            setTagValidation(errors);
-            showToast('标签校验未通过，请先修正', 'error');
-            return false;
-        }
-        if (!isTagDirty()) {
-            showToast('标签没有修改', 'info');
-            return false;
-        }
-        tagsSaving = true;
-        syncSourceControls();
-        try {
-            var data = await api(API_TAGS, {
-                method: 'POST',
-                body: JSON.stringify({ timestamp: source.timestamp, tags: currentTags.slice() })
-            });
-            var responseTags = (data && Array.isArray(data.tags))
-                ? data.tags.map(function (tag) { return String(tag); })
-                : currentTags.slice();
-            source.tags = responseTags.slice();
-            savedTags = responseTags.slice();
-            currentTags = responseTags.slice();
-            clearAlert('tags');
-            updateTagDirtyBadge();
-            showToast('标签已保存', 'ok');
-            // 刷新源列表与 tag 计数，保持当前选中源与过滤状态
-            await loadSources({ preserveSelection: true });
-            return true;
-        } catch (error) {
-            reportError('保存标签失败', error, 'tags');
-            return false;
-        } finally {
-            tagsSaving = false;
-            syncSourceControls();
-        }
-    }
-
-    /* ---------------- 预览 ---------------- */
-    function setPreviewLoading(loading) {
-        var preview = $('preview');
-        preview.setAttribute('aria-busy', loading ? 'true' : 'false');
-        ['frame-source', 'frame-classification'].forEach(function (id) {
-            var frame = $(id);
-            if (!frame) return;
-            frame.classList.toggle('is-loading', loading);
-            if (loading) frame.classList.remove('is-error');
-        });
-    }
-
-    function setVeilText(text) {
-        document.querySelectorAll('.veil-text').forEach(function (el) {
-            el.textContent = text;
-        });
-    }
-
-    function setFrameImage(which, src) {
-        var img = $(which === 'source' ? 'img-source' : 'img-classification');
-        var frame = $(which === 'source' ? 'frame-source' : 'frame-classification');
-        if (!img || !frame) return;
-        img.onload = function () {
-            frame.dataset.loaded = '1';
-            frame.classList.remove('is-empty', 'is-error');
-            frame.classList.add('is-loaded');
-        };
-        img.onerror = function () {
-            frame.classList.remove('is-loading');
-            if (frame.dataset.loaded === '1') {
-                showToast('其中一张预览图解码失败，可点击「重跑当前预览」重试', 'error');
-                return;
-            }
-            frame.classList.add('is-error');
-        };
-        var emptyText = frame.querySelector('.frame-empty');
-        if (emptyText) emptyText.textContent = '正在载入图像…';
-        img.src = src;
-    }
-
-    function setText(id, text) {
-        var el = $(id);
-        if (el) el.textContent = text;
-    }
-
-    function setBar(id, ratio) {
-        var el = $(id);
-        if (!el) return;
-        var percent = (isNum(ratio) && isFinite(ratio)) ? clamp(ratio * 100, 0, 100) : 0;
-        el.style.width = percent.toFixed(1) + '%';
-    }
-
-    function renderMetrics(metrics) {
-        var m = metrics || {};
-        function percent(value) { return isNum(value) ? (value * 100).toFixed(2) + '%' : '—'; }
-        function count(value) { return isNum(value) ? Math.round(value).toLocaleString('zh-CN') : '—'; }
-
-        setText('m-cloud', percent(m.cloudCoverage));
-        setBar('bar-cloud', m.cloudCoverage);
-        setText('m-sea', percent(m.seaBlueness));
-        setBar('bar-sea', m.seaBlueness);
-        setText('m-index', percent(m.bluenessIndex));
-        setBar('bar-index', m.bluenessIndex);
-        setText('m-visibility', isNum(m.visibilityKm) ? m.visibilityKm.toFixed(2) + ' km' : '—');
-        setText('m-visibility-level', m.visibilityLevel ? '等级：' + m.visibilityLevel : '等级：—');
-        setText('m-blue', count(m.bluePixels));
-        setText('m-blue-pct', '占比 ' + percent(m.bluePercentage));
-        setText('m-yellow', count(m.yellowPixels));
-        setText('m-yellow-pct', '占比 ' + percent(m.yellowPercentage));
-        setText('m-cloud-px', count(m.cloudPixels));
-        setText('m-ocean', count(m.totalOceanPixels));
-        $('metrics').classList.remove('is-empty');
-    }
-
-    function applyPreview(data) {
-        if (!data) return;
-        if (data.image && data.image.source_preview) setFrameImage('source', data.image.source_preview);
-        if (data.image && data.image.classification) setFrameImage('classification', data.image.classification);
-
-        var width = data.width;
-        var height = data.height;
-        var dims = $('dims-badge');
-        if (isNum(width) && isNum(height)) {
-            dims.hidden = false;
-            dims.textContent = Math.round(width) + ' × ' + Math.round(height) + ' px';
-            dims.title = '预览图实际像素尺寸';
-        }
-
-        var status = data.metrics ? data.metrics.status : null;
-        var statusBadge = $('status-badge');
-        if (status) {
-            statusBadge.hidden = false;
-            statusBadge.textContent = '状态：' + (status === 'completed' ? '完成' : (status === 'cloudy' ? '多云' : status));
-            statusBadge.dataset.status = status;
-        } else {
-            statusBadge.hidden = true;
-        }
-
-        renderMetrics(data.metrics);
-
-        var latency = $('latency-badge');
-        if (isNum(data.elapsedMs)) {
-            latency.hidden = false;
-            latency.textContent = Math.round(data.elapsedMs) + ' ms';
-            latency.title = '服务端处理耗时';
-        }
-
-        var sourceLabel = currentSourceLabel();
-        setHint('预览已更新' + (sourceLabel ? ' · ' + sourceLabel : ''), 'ok');
-        clearAlert('preview');
-    }
-
-    function setPreviewError(error) {
-        reportError('预览生成失败', error, 'preview');
-        setHint('预览生成失败：' + ((error && error.message) ? error.message : '未知错误') + '，可点击「重跑当前预览」重试。', 'error');
-        ['frame-source', 'frame-classification'].forEach(function (id) {
-            var frame = $(id);
-            if (frame && frame.dataset.loaded !== '1') frame.classList.add('is-error');
-        });
-        $('latency-badge').hidden = true;
-    }
-
     function apiRanges() {
         var result = {};
         CLASS_DEFS.forEach(function (def) {
@@ -2524,69 +2201,13 @@
         return result;
     }
 
-    async function requestPreview() {
-        if (!currentSource) {
-            setHint('没有可用的分析时间点，无法生成预览', 'warn');
-            return;
-        }
-
-        // 约定：阈值不合法时直接跳过预览请求（服务端会返回 400 且计算无意义），
-        // 保留上一次有效预览并给出警告；修正后下一次 change 会自动恢复。
-        var useSavedConfig = firstPreview;
-        if (!useSavedConfig && validateModel().length) {
-            setHint('阈值不合法，已暂停实时预览；修正后会自动恢复。', 'warn');
-            return;
-        }
-
-        var requestSeq = ++seq;
-        if (inflight) {
-            try { inflight.abort(); } catch (error) { /* 忽略已结束的请求 */ }
-        }
-        var controller = new AbortController();
-        inflight = controller;
-        if (!useSavedConfig) previewRequested = true;
-        firstPreview = false;
-
-        setVeilText('正在生成预览…');
-        setPreviewLoading(true);
-        setHint('正在生成预览…', 'busy');
-        $('btn-rerun').disabled = true;
-
-        var payload = {
-            source: currentSource,
-            ranges: useSavedConfig ? null : apiRanges()
-        };
-
-        try {
-            var data = await api(API_PREVIEW, {
-                method: 'POST',
-                body: JSON.stringify(payload),
-                signal: controller.signal
-            });
-            if (requestSeq !== seq) return;  // 已有更新的请求，丢弃过期响应
-            applyPreview(data);
-        } catch (error) {
-            if (error && error.name === 'AbortError') return;
-            if (requestSeq !== seq) return;
-            setPreviewError(error);
-        } finally {
-            if (requestSeq === seq) {
-                setPreviewLoading(false);
-                inflight = null;
-                syncSourceControls();
-            }
-        }
+    // 表单值合法时把当前面板阈值带给预览/点选接口；非法或状态未就绪时传 null 表示「用生效阈值」。
+    function rangesForRequest() {
+        if (!stateLoaded) return null;
+        if (validateModel().length) return null;
+        return apiRanges();
     }
 
-    function schedulePreview() {
-        if (debounceId) clearTimeout(debounceId);
-        debounceId = setTimeout(function () {
-            debounceId = null;
-            requestPreview();
-        }, DEBOUNCE_MS);
-    }
-
-    /* ---------------- 表单交互 ---------------- */
     function handleControlInput(el) {
         var cls = el.dataset.class;
         var bound = el.dataset.bound;
@@ -2644,7 +2265,7 @@
         updateDirty();
         syncSaveButton(errors);
         schedulePreview();
-        showToast('已载入' + (className ? '「' + labelFor(className) + '」' : '全部类别') + '的内置默认值（尚未保存）', 'info');
+        showToast('已载入' + (className ? '「' + labelCn(className) + '」' : '全部类别') + '的内置默认值（尚未保存）', 'info');
     }
 
     function setSaving(on) {
@@ -2675,15 +2296,17 @@
         var sentKey = rangesKey(model);
         setSaving(true);
         try {
-            var data = await api(API_STATE, {
+            var data = await requestApi(API, {
                 method: 'POST',
-                body: JSON.stringify({ ranges: apiRanges() })
+                json: { ranges: apiRanges() }
             });
             var keepLocalEdits = rangesKey(model) !== sentKey;
             adoptState(data, !keepLocalEdits);
             clearAlert('save');
             setSaveNote('已保存 · ' + clockNow());
             showToast('已保存，下一次分析立即使用新阈值', 'ok');
+            if (keepLocalEdits) schedulePreview();
+            else if (currentImageId) requestPreview();
         } catch (error) {
             reportError('保存失败', error, 'save');
         } finally {
@@ -2701,13 +2324,13 @@
         var button = $('btn-reset');
         button.disabled = true;
         try {
-            var data = await api(API_RESET, { method: 'POST' });
+            var data = await requestApi(API_RESET, { method: 'POST' });
             adoptState(data, true);
             clearAlert('reset');
             setSaveNote('已恢复内置默认 · ' + clockNow());
             showToast('已恢复内置默认阈值，已立即生效', 'ok');
             firstPreview = false;
-            requestPreview();
+            if (currentImageId) requestPreview();
         } catch (error) {
             reportError('恢复默认值失败', error, 'reset');
         } finally {
@@ -2715,7 +2338,1360 @@
         }
     }
 
-    /* ---------------- 事件绑定 ---------------- */
+    /* =====================================================================
+       二、图片实验台：导入 / 缩略图 / 选择
+       ===================================================================== */
+
+    function normalizeLimits(raw) {
+        var result = cloneLimits(DEFAULT_LIMITS);
+        if (!raw || typeof raw !== 'object') return result;
+        ['max_images', 'max_upload_bytes', 'max_side', 'zip_max_entries'].forEach(function (key) {
+            var value = Number(raw[key]);
+            if (isFinite(value) && value > 0) result[key] = Math.round(value);
+        });
+        if (Array.isArray(raw.allowed_ext) && raw.allowed_ext.length) {
+            result.allowed_ext = raw.allowed_ext.map(function (ext) { return String(ext).toLowerCase(); });
+        }
+        return result;
+    }
+
+    function normalizeLabels(raw) {
+        if (!Array.isArray(raw) || !raw.length) return LABEL_FALLBACK.slice();
+        var result = [];
+        raw.forEach(function (item) {
+            if (!item || !item.key) return;
+            var fallback = LABEL_FALLBACK.filter(function (def) { return def.key === item.key; })[0];
+            result.push({
+                key: String(item.key),
+                label: String(item.label || (fallback ? fallback.label : item.key))
+            });
+        });
+        return result.length ? result : LABEL_FALLBACK.slice();
+    }
+
+    function findImage(imageId) {
+        if (!imageId) return null;
+        return lab.images.filter(function (item) { return item.id === imageId; })[0] || null;
+    }
+
+    function currentImage() { return findImage(currentImageId); }
+
+    function currentCorrections() {
+        if (!currentImageId) return [];
+        var list = correctionsByImage[currentImageId];
+        return Array.isArray(list) ? list : [];
+    }
+
+    function countCorrectionsTotal() {
+        var total = 0;
+        lab.images.forEach(function (item) { total += Number(item.correction_count) || 0; });
+        return total;
+    }
+
+    function setCorrectionsFor(imageId, list) {
+        if (!imageId) return;
+        var normalized = Array.isArray(list) ? list.slice() : [];
+        correctionsByImage[imageId] = normalized;
+        var image = findImage(imageId);
+        if (image) image.correction_count = normalized.length;
+        lab.correctionsTotal = countCorrectionsTotal();
+    }
+
+    function renderLabelButtons() {
+        document.querySelectorAll('.popover-label-btn').forEach(function (btn) {
+            var key = btn.dataset.label;
+            btn.textContent = labelCn(key);
+            btn.title = '标注为' + labelCn(key) + '（快捷键 ' + (LABEL_SHORTCUT[key] || '') + '）';
+        });
+    }
+
+    function renderLimits() {
+        var limits = lab.limits || DEFAULT_LIMITS;
+        var extText = limits.allowed_ext.map(function (ext) { return ext.replace(/^\./, ''); }).join(' / ');
+        $('dropzone-hint').textContent = '支持 ' + extText + '；单次 ≤ ' + formatBytes(limits.max_upload_bytes) +
+            '，最多保留 ' + limits.max_images + ' 张，图片会等比缩放到最长边 ' + limits.max_side + ' px。ZIP 内按条目批量导入。';
+        $('image-count-badge').textContent = '已导入 ' + lab.images.length + ' / ' + limits.max_images + ' 张';
+        $('image-count-badge').title = '单次导入 ≤ ' + formatBytes(limits.max_upload_bytes) +
+            '，单张最长边缩放到 ' + limits.max_side + ' px，ZIP 最多 ' + limits.zip_max_entries + ' 个条目';
+    }
+
+    function buildThumb(image) {
+        var selected = image.id === currentImageId;
+        var el = document.createElement('div');
+        el.className = 'thumb' + (selected ? ' is-selected' : '');
+        el.setAttribute('role', 'option');
+        el.setAttribute('aria-selected', selected ? 'true' : 'false');
+        el.tabIndex = 0;
+        el.dataset.imageId = image.id;
+        el.title = image.name || image.id;
+
+        var frame = document.createElement('span');
+        frame.className = 'thumb-frame';
+        var img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = image.thumb_url || '';
+        img.addEventListener('error', function () { frame.classList.add('is-broken'); });
+        frame.appendChild(img);
+        var fallback = document.createElement('span');
+        fallback.className = 'thumb-fallback';
+        fallback.textContent = '缩略图加载失败';
+        frame.appendChild(fallback);
+        el.appendChild(frame);
+
+        var name = document.createElement('span');
+        name.className = 'thumb-name';
+        name.textContent = image.name || image.id;
+        name.title = image.name || image.id;
+        el.appendChild(name);
+
+        var meta = document.createElement('span');
+        meta.className = 'thumb-meta';
+        var corrected = Number(image.correction_count) || 0;
+        var count = document.createElement('span');
+        count.className = 'thumb-count' + (corrected ? '' : ' is-zero');
+        count.textContent = corrected ? ('已纠正 ' + corrected) : '未纠正';
+        meta.appendChild(count);
+        var dims = document.createElement('span');
+        dims.className = 'thumb-dims';
+        dims.textContent = (isNum(Number(image.width)) && isNum(Number(image.height)))
+            ? (image.width + '×' + image.height)
+            : '—';
+        meta.appendChild(dims);
+        el.appendChild(meta);
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'thumb-del';
+        del.dataset.removeImageId = image.id;
+        del.setAttribute('aria-label', '移除图片 ' + (image.name || image.id));
+        del.title = '移除该图片';
+        del.textContent = '×';
+        del.disabled = importing;
+        el.appendChild(del);
+        return el;
+    }
+
+    function renderThumbs(ensureVisible) {
+        var strip = $('thumb-strip');
+        var empty = $('thumb-empty');
+        if (!lab.images.length) {
+            strip.replaceChildren();
+            empty.hidden = false;
+            var limits = lab.limits || DEFAULT_LIMITS;
+            empty.textContent = '还没有导入图片。拖入单张图片，或选择一个 ZIP 批量导入（最多保留 ' + limits.max_images + ' 张）。';
+            return;
+        }
+        empty.hidden = true;
+        var fragment = document.createDocumentFragment();
+        lab.images.forEach(function (image) {
+            fragment.appendChild(buildThumb(image));
+        });
+        strip.replaceChildren(fragment);
+
+        if (ensureVisible) {
+            var selected = strip.querySelector('.thumb.is-selected');
+            if (selected) {
+                var left = selected.offsetLeft;
+                var right = left + selected.offsetWidth;
+                if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - 4);
+                else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 4;
+            }
+        }
+    }
+
+    function renderImportSummary() {
+        var box = $('import-summary');
+        var skipBox = $('skip-list');
+        if (!importSummary) {
+            box.hidden = true;
+            skipBox.hidden = true;
+            skipBox.replaceChildren();
+            return;
+        }
+        box.hidden = false;
+        box.replaceChildren();
+
+        var text = document.createElement('span');
+        text.textContent = importSummary.imported
+            ? ('已导入 ' + importSummary.imported + ' 张，跳过 ' + importSummary.skipped + ' 张')
+            : ('没有导入新图片，跳过 ' + importSummary.skipped + ' 张');
+        box.appendChild(text);
+
+        if (importSummary.truncated) {
+            var truncated = document.createElement('span');
+            truncated.className = 'import-truncated';
+            truncated.textContent = '已达图片上限或 ZIP 条目上限，部分文件未导入';
+            box.appendChild(truncated);
+        }
+
+        if (skippedDetails.length) {
+            var toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'btn btn-sm skip-toggle';
+            toggle.setAttribute('aria-expanded', skipExpanded ? 'true' : 'false');
+            toggle.setAttribute('aria-controls', 'skip-list');
+            toggle.textContent = (skipExpanded ? '收起跳过原因' : '查看跳过原因') + '（' + skippedDetails.length + '）';
+            toggle.addEventListener('click', function () {
+                skipExpanded = !skipExpanded;
+                renderImportSummary();
+            });
+            box.appendChild(toggle);
+            skipBox.hidden = !skipExpanded;
+            if (skipExpanded) renderSkipList();
+            else skipBox.replaceChildren();
+        } else {
+            skipBox.hidden = true;
+            skipBox.replaceChildren();
+        }
+    }
+
+    function renderSkipList() {
+        var box = $('skip-list');
+        box.replaceChildren();
+        var list = document.createElement('ul');
+        skippedDetails.slice(0, 8).forEach(function (item) {
+            var li = document.createElement('li');
+            li.textContent = (item.name || '未命名文件') + '：' + (item.reason || '无法导入');
+            list.appendChild(li);
+        });
+        box.appendChild(list);
+        if (skippedDetails.length > 8) {
+            var more = document.createElement('p');
+            more.className = 'skip-more';
+            more.textContent = '还有 ' + (skippedDetails.length - 8) + ' 条跳过原因未列出';
+            box.appendChild(more);
+        }
+    }
+
+    function renderImportProgress() {
+        var wrap = $('import-progress');
+        var veilText = $('import-veil-text');
+        if (!importing) {
+            wrap.hidden = true;
+            if (veilText) veilText.textContent = '正在导入图片…';
+            return;
+        }
+        wrap.hidden = false;
+        var percent = importState.total > 0
+            ? (importState.done / importState.total) * 100
+            : 0;
+        $('import-bar-fill').style.width = clamp(percent, 0, 100).toFixed(1) + '%';
+        var index = Math.min(importState.done + 1, Math.max(importState.total, 1));
+        var label = importState.current
+            ? ('正在导入 ' + index + ' / ' + importState.total + '：' + importState.current)
+            : ('正在导入 ' + index + ' / ' + importState.total + '…');
+        $('import-progress-text').textContent = label;
+        if (veilText) veilText.textContent = label;
+    }
+
+    function renderLabBadges() {
+        renderLimits();
+        $('btn-clear-images').disabled = importing || clearLoading || lab.images.length === 0;
+    }
+
+    function renderAllLab() {
+        renderLabBadges();
+        renderThumbs(false);
+        renderImageBadges();
+        renderCorrections();
+        renderLabelButtons();
+        syncControls();
+    }
+
+    async function loadLab() {
+        var requestSeq = ++labSeq;
+        try {
+            var data = await requestApi(API_LAB);
+            if (requestSeq !== labSeq) return false;
+            lab.images = Array.isArray(data.images) ? data.images.slice() : [];
+            lab.limits = normalizeLimits(data.limits);
+            lab.labels = normalizeLabels(data.labels);
+            lab.correctionsTotal = isNum(Number(data.corrections_total)) ? Number(data.corrections_total) : countCorrectionsTotal();
+            labLoaded = true;
+            Object.keys(correctionsByImage).forEach(function (id) {
+                if (!findImage(id)) delete correctionsByImage[id];
+            });
+            if (currentImageId && !findImage(currentImageId)) {
+                currentImageId = '';
+                selectedBlock = null;
+                hidePopover();
+            }
+            renderAllLab();
+            clearAlert('lab');
+            return true;
+        } catch (error) {
+            if (requestSeq !== labSeq) return false;
+            labLoaded = false;
+            reportError('无法读取图片实验台状态', error, 'lab');
+            setHint('图片实验台状态读取失败：' + errorMessage(error) + '，可点击「重新预览」重试。', 'error');
+            renderAllLab();
+            return false;
+        }
+    }
+
+    /* ---------------- 导入图片 ---------------- */
+    function allowedExtensions() {
+        var limits = lab.limits || DEFAULT_LIMITS;
+        return Array.isArray(limits.allowed_ext) && limits.allowed_ext.length ? limits.allowed_ext : DEFAULT_ALLOWED_EXT;
+    }
+
+    function isZipName(name) {
+        return /\.zip$/i.test(String(name || ''));
+    }
+
+    function isAllowedName(name) {
+        var lower = String(name || '').toLowerCase();
+        if (isZipName(lower)) return true;
+        return allowedExtensions().some(function (ext) {
+            return lower.slice(-ext.length) === ext;
+        });
+    }
+
+    async function uploadFiles(fileList) {
+        if (importing) {
+            showToast('正在导入中，请稍候', 'warn');
+            return;
+        }
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+
+        var limits = lab.limits || DEFAULT_LIMITS;
+        var accepted = [];
+        var localSkipped = [];
+        files.forEach(function (file) {
+            if (!isAllowedName(file.name)) {
+                localSkipped.push({ name: file.name, reason: '不是支持的图片格式' });
+                return;
+            }
+            if (file.size > limits.max_upload_bytes) {
+                localSkipped.push({ name: file.name, reason: '超过单文件上限 ' + formatBytes(limits.max_upload_bytes) });
+                return;
+            }
+            accepted.push(file);
+        });
+
+        if (!accepted.length) {
+            importSummary = { imported: 0, skipped: localSkipped.length, truncated: false };
+            skippedDetails = localSkipped;
+            skipExpanded = skippedDetails.length > 0;
+            renderImportSummary();
+            showToast('没有可导入的文件（' + (localSkipped[0] ? localSkipped[0].reason : '未知原因') + '）', 'warn');
+            return;
+        }
+
+        importing = true;
+        importState = { total: accepted.length, done: 0, current: accepted[0].name };
+        var importedAll = [];
+        var skippedAll = localSkipped.slice();
+        var truncated = false;
+        var selectedId = null;
+        var failure = null;
+        importSummary = null;
+        skippedDetails = [];
+        skipExpanded = false;
+        renderImportSummary();
+        renderImportProgress();
+        syncControls();
+
+        for (var i = 0; i < accepted.length; i += 1) {
+            var file = accepted[i];
+            if (lab.images.length >= limits.max_images) {
+                truncated = true;
+                skippedAll.push({ name: file.name, reason: '已达图片上限 ' + limits.max_images + ' 张，请先删除部分图片' });
+                break;
+            }
+            importState.current = file.name;
+            importState.done = i;
+            renderImportProgress();
+            try {
+                var data = await requestApi(API_IMAGES + '?filename=' + encodeURIComponent(file.name), {
+                    method: 'POST',
+                    body: file,
+                    contentType: 'application/octet-stream'
+                });
+                var imported = Array.isArray(data.imported) ? data.imported : [];
+                importedAll = importedAll.concat(imported);
+                if (Array.isArray(data.skipped)) skippedAll = skippedAll.concat(data.skipped);
+                if (data.truncated) truncated = true;
+                if (data.selected) selectedId = data.selected;
+                mergeImages(imported);
+                renderThumbs(false);
+                renderLabBadges();
+                syncControls();
+            } catch (error) {
+                failure = error;
+                skippedAll.push({ name: file.name, reason: errorMessage(error) });
+                if (error && error.status === 413) continue;
+                if (error && error.status === 400 && /上限|最多/.test(errorMessage(error))) {
+                    truncated = true;
+                    break;
+                }
+            }
+        }
+
+        importState.done = accepted.length;
+        importing = false;
+        renderImportProgress();
+        syncControls();
+
+        importSummary = {
+            imported: importedAll.length,
+            skipped: skippedAll.length,
+            truncated: truncated
+        };
+        skippedDetails = skippedAll;
+        skipExpanded = false;
+        renderImportSummary();
+
+        if (importedAll.length) {
+            showToast('已导入 ' + importedAll.length + ' 张图片', 'ok');
+            setHint('导入完成。已用当前阈值自动分类，点击分类结果图上的色块开始纠正。', 'ok');
+            await loadLab();
+            var preferred = selectedId && findImage(selectedId) ? selectedId : (importedAll[0] && findImage(importedAll[0].id) ? importedAll[0].id : '');
+            if (preferred) selectImage(preferred);
+            else if (!currentImageId && lab.images.length) selectImage(lab.images[0].id);
+        } else {
+            setHint('没有导入任何图片：' + (skippedDetails[0] ? skippedDetails[0].reason : '请检查文件格式与大小'), 'warn');
+        }
+
+        if (failure && !importedAll.length) {
+            reportError('导入图片失败', failure, 'import');
+        } else if (failure) {
+            clearAlert('import');
+            setHint('部分文件导入失败，可在「跳过原因」中查看。', 'warn');
+        }
+    }
+
+    function mergeImages(list) {
+        (list || []).forEach(function (image) {
+            if (!image || !image.id) return;
+            var index = lab.images.findIndex(function (item) { return item.id === image.id; });
+            if (index >= 0) lab.images[index] = image;
+            else lab.images.push(image);
+        });
+        lab.correctionsTotal = Math.max(lab.correctionsTotal, countCorrectionsTotal());
+    }
+
+    async function removeImage(imageId) {
+        if (importing) return;
+        var image = findImage(imageId);
+        if (!image) return;
+        var wasCurrent = imageId === currentImageId;
+        try {
+            var data = await requestApi(API_IMAGES + '/' + encodeURIComponent(imageId), { method: 'DELETE' });
+            delete correctionsByImage[imageId];
+            lab.images = Array.isArray(data.images) ? data.images.slice() : lab.images.filter(function (item) { return item.id !== imageId; });
+            lab.correctionsTotal = countCorrectionsTotal();
+            if (wasCurrent) {
+                currentImageId = '';
+                selectedBlock = null;
+                hidePopover();
+            }
+            if (wasCurrent) {
+                if (lab.images.length) {
+                    currentImageId = lab.images[0].id;
+                    renderAllLab();
+                    requestPreview();
+                } else {
+                    renderAllLab();
+                    clearPreviewUi('还没有导入图片。拖入图片或 ZIP 重新开始。');
+                }
+            } else {
+                renderAllLab();
+            }
+            showToast('已移除图片「' + (image.name || image.id) + '」', 'ok');
+            clearAlert('images');
+        } catch (error) {
+            reportError('移除图片失败', error, 'images');
+        }
+    }
+
+    async function clearImages() {
+        if (importing || clearLoading) return;
+        if (!lab.images.length) {
+            showToast('没有可清空的图片', 'info');
+            return;
+        }
+        if (!window.confirm('确定清空全部 ' + lab.images.length + ' 张已导入图片？该操作不可撤销，图片上的纠正标注也会一并删除。')) return;
+
+        clearLoading = true;
+        syncControls();
+        try {
+            var data = await requestApi(API_IMAGES_CLEAR, { method: 'POST' });
+            lab.images = Array.isArray(data.images) ? data.images.slice() : [];
+            correctionsByImage = Object.create(null);
+            lab.correctionsTotal = 0;
+            currentImageId = '';
+            selectedBlock = null;
+            hidePopover();
+            importSummary = null;
+            skippedDetails = [];
+            skipExpanded = false;
+            resetOptimizePanel();
+            renderAllLab();
+            renderImportSummary();
+            clearPreviewUi('还没有导入图片。拖入图片或 ZIP 重新开始。');
+            showToast('已清空 ' + (data.deleted || 0) + ' 张图片', 'ok');
+            clearAlert('images');
+        } catch (error) {
+            reportError('清空图片失败', error, 'images');
+        } finally {
+            clearLoading = false;
+            syncControls();
+        }
+    }
+
+    /* ---------------- 选择图片 ---------------- */
+    function selectImage(imageId) {
+        var image = findImage(imageId);
+        if (!image) return false;
+        var changed = imageId !== currentImageId;
+        currentImageId = imageId;
+        if (changed) {
+            selectedBlock = null;
+            hidePopover();
+            previewState = { width: null, height: null, fullWidth: null, fullHeight: null, analysis: null };
+            setFrameEmpty('source', '正在载入分析输入…');
+            setFrameEmpty('classification', '正在载入分类结果…');
+            clearMetrics();
+            setHint('正在用当前阈值渲染「' + (image.name || image.id) + '」…', 'busy');
+        }
+        renderThumbs(true);
+        renderImageBadges();
+        renderCorrections();
+        syncControls();
+        requestPreview();
+        return true;
+    }
+
+    /* =====================================================================
+       三、预览（防抖 180ms + AbortController + 递增序号）
+       ===================================================================== */
+
+    function setFrameEmpty(which, text) {
+        var frame = $(which === 'source' ? 'frame-source' : 'frame-classification');
+        var img = $(which === 'source' ? 'img-source' : 'img-classification');
+        if (!frame) return;
+        frame.classList.remove('is-loaded', 'is-error', 'is-loading', 'is-clickable');
+        frame.classList.add('is-empty');
+        if (img) {
+            img.removeAttribute('src');
+        }
+        var emptyText = frame.querySelector('.frame-empty');
+        if (emptyText) emptyText.textContent = text || '暂无图像';
+    }
+
+    function setFrameImage(which, src) {
+        var frame = $(which === 'source' ? 'frame-source' : 'frame-classification');
+        var img = $(which === 'source' ? 'img-source' : 'img-classification');
+        if (!frame || !img) return;
+        if (!src) {
+            setFrameEmpty(which, '图像数据为空');
+            return;
+        }
+        frame.classList.remove('is-empty', 'is-error');
+        frame.classList.add('is-loading');
+        var emptyText = frame.querySelector('.frame-empty');
+        if (emptyText) emptyText.textContent = '正在载入图像…';
+        img.onload = function () {
+            frame.classList.remove('is-loading', 'is-error');
+            frame.classList.add('is-loaded');
+            if (which === 'classification') frame.classList.add('is-clickable');
+        };
+        img.onerror = function () {
+            frame.classList.remove('is-loading', 'is-loaded', 'is-clickable');
+            frame.classList.add('is-error');
+        };
+        img.src = src;
+    }
+
+    function setFramesLoading(on) {
+        ['frame-source', 'frame-classification'].forEach(function (id) {
+            var frame = $(id);
+            if (!frame) return;
+            frame.classList.toggle('is-loading', on);
+            if (on) frame.classList.remove('is-error');
+        });
+        var card = $('card-correct');
+        if (card) card.setAttribute('aria-busy', on ? 'true' : 'false');
+    }
+
+    function applyImages(imageObj, width, height) {
+        if (imageObj && imageObj.source_preview) setFrameImage('source', imageObj.source_preview);
+        if (imageObj && imageObj.classification) setFrameImage('classification', imageObj.classification);
+        if (isNum(width) && isNum(height)) {
+            previewState.width = width;
+            previewState.height = height;
+            var dims = $('dims-badge');
+            dims.hidden = false;
+            dims.textContent = Math.round(width) + ' × ' + Math.round(height) + ' px';
+            dims.title = '返回图尺寸（最长边 ≤1000 px）';
+        }
+    }
+
+    function applyMetrics(metrics, analysis, accuracyOverride) {
+        var m = metrics || {};
+        if (metrics) {
+            setText('m-cloud', percentText(m.cloudCoverage));
+            setBar('bar-cloud', m.cloudCoverage);
+            setText('m-sea', percentText(m.seaBlueness));
+            setBar('bar-sea', m.seaBlueness);
+            setText('m-index', percentText(m.bluenessIndex));
+            setBar('bar-index', m.bluenessIndex);
+            setText('m-visibility', isNum(m.visibilityKm) ? (Number(m.visibilityKm).toFixed(2) + ' km') : '—');
+            setText('m-visibility-level', m.visibilityLevel ? ('等级：' + m.visibilityLevel) : '等级：—');
+            setText('m-blue', countText(m.bluePixels));
+            setText('m-blue-pct', '占比 ' + percentText(m.bluePercentage));
+            setText('m-yellow', countText(m.yellowPixels));
+            setText('m-yellow-pct', '占比 ' + percentText(m.yellowPercentage));
+            setText('m-cloud-px', countText(m.cloudPixels));
+            setText('m-ocean', countText(m.totalOceanPixels));
+            $('metrics').classList.remove('is-empty');
+        }
+        if (analysis) previewState.analysis = analysis;
+
+        var analysisData = analysis || previewState.analysis || {};
+        var accuracy = isNum(accuracyOverride) ? accuracyOverride
+            : (isNum(analysisData.correction_accuracy) ? analysisData.correction_accuracy : null);
+        setText('m-accuracy', isNum(accuracy) ? percentText(accuracy) : '—');
+        setBar('bar-accuracy', accuracy);
+        setText('m-accuracy-hint', isNum(analysisData.correction_accuracy)
+            ? ('correctionAccuracy · ' + (currentCorrections().length || 0) + ' 处纠正')
+            : '无纠正样本');
+
+        var ignored = ignoredRatio();
+        setText('m-ignored', isNum(ignored) ? percentText(ignored) : '—');
+        setBar('bar-ignored', ignored);
+        setText('m-ignored-hint', isNum(analysisData.ignored_pixels)
+            ? ('ignoredPixels ' + countText(analysisData.ignored_pixels))
+            : 'ignoredRatio');
+
+        setText('m-ocean-hint', isNum(analysisData.analyzed_pixels)
+            ? ('totalOceanPixels · 自动排除 ' + countText(analysisData.auto_excluded_pixels))
+            : 'totalOceanPixels');
+    }
+
+    function applyPreviewPayload(data) {
+        if (!data) return;
+        applyImages(data.image, data.width, data.height);
+        if (isNum(data.full_width) && isNum(data.full_height)) {
+            previewState.fullWidth = data.full_width;
+            previewState.fullHeight = data.full_height;
+        }
+        if (data.analysis) previewState.analysis = data.analysis;
+        // 契约 3.4：preview 返回当前图片的完整 corrections，用于恢复底部 chips
+        if (currentImageId && Array.isArray(data.corrections)) {
+            setCorrectionsFor(currentImageId, data.corrections);
+            renderThumbs(false);
+            renderCorrections();
+        }
+        applyMetrics(data.metrics, data.analysis, data.analysis ? data.analysis.correction_accuracy : null);
+        renderImageBadges();
+        syncControls();
+    }
+
+    function renderImageBadges() {
+        var image = currentImage();
+        var cur = $('cur-image-badge');
+        if (image) {
+            cur.textContent = (image.name || image.id) + ' · ' + (image.width || '?') + '×' + (image.height || '?');
+            cur.title = image.name || image.id;
+        } else {
+            cur.textContent = '未选择图片';
+            cur.removeAttribute('title');
+        }
+
+        var analysis = previewState.analysis || {};
+        var blocks = isNum(Number(analysis.block_count)) ? Number(analysis.block_count)
+            : (image && isNum(Number(image.block_count)) ? Number(image.block_count) : null);
+        setBadge('blocks-badge', blocks === null ? '色块 —' : ('色块 ' + countText(blocks)));
+
+        var corrected = currentCorrections().length || (image ? (Number(image.correction_count) || 0) : 0);
+        setBadge('corrections-badge', '已纠正 ' + corrected);
+
+        var accuracy = isNum(analysis.correction_accuracy) ? analysis.correction_accuracy : null;
+        setBadge('accuracy-badge', '纠正符合率 ' + (accuracy === null ? '—' : percentText(accuracy)));
+
+        var ignored = ignoredRatio();
+        setBadge('ignored-badge', '忽略占比 ' + (ignored === null ? '—' : percentText(ignored)));
+    }
+
+    function ignoredRatio() {
+        var analysis = previewState.analysis || {};
+        if (isNum(analysis.ignored_ratio)) return analysis.ignored_ratio;
+        var image = currentImage();
+        if (image && isNum(Number(image.ignored_ratio))) return Number(image.ignored_ratio);
+        return null;
+    }
+
+    function clearMetrics() {
+        ['m-cloud', 'm-sea', 'm-index', 'm-visibility', 'm-blue', 'm-yellow',
+            'm-cloud-px', 'm-ocean', 'm-accuracy', 'm-ignored'].forEach(function (id) {
+            setText(id, '—');
+        });
+        setText('m-visibility-level', '等级：—');
+        setText('m-blue-pct', '占比 —');
+        setText('m-yellow-pct', '占比 —');
+        setText('m-accuracy-hint', 'correctionAccuracy');
+        setText('m-ignored-hint', 'ignoredRatio');
+        setText('m-ocean-hint', 'totalOceanPixels');
+        ['bar-cloud', 'bar-sea', 'bar-index', 'bar-accuracy', 'bar-ignored'].forEach(function (id) {
+            setBar(id, null);
+        });
+        $('metrics').classList.add('is-empty');
+    }
+
+    function clearPreviewUi(message) {
+        setFrameEmpty('source', message || '还没有导入图片。');
+        setFrameEmpty('classification', message || '还没有导入图片。');
+        previewState = { width: null, height: null, fullWidth: null, fullHeight: null, analysis: null };
+        clearMetrics();
+        renderImageBadges();
+        renderCorrections();
+        var dims = $('dims-badge');
+        if (dims) dims.hidden = true;
+        setHint(message || '请先导入并选择一张卫星图片', 'muted');
+        syncControls();
+    }
+
+    async function requestPreview() {
+        if (!currentImageId) {
+            setHint('请先在「1 · 导入卫星图片」中导入并选择图片。', 'muted');
+            return;
+        }
+
+        var errors = validateModel();
+        var useSavedConfig = firstPreview && !touched;
+        if (!useSavedConfig && errors.length) {
+            setHint('阈值不合法，已暂停实时预览；修正后会自动恢复。', 'warn');
+            return;
+        }
+
+        var requestSeq = ++previewSeq;
+        if (previewInflight) {
+            try { previewInflight.abort(); } catch (error) { /* 忽略已结束的请求 */ }
+        }
+        var controller = new AbortController();
+        previewInflight = controller;
+        firstPreview = false;
+
+        setFramesLoading(true);
+        setHint('正在用当前阈值渲染预览…', 'busy');
+
+        var payload = {
+            image_id: currentImageId,
+            ranges: useSavedConfig ? null : apiRanges(),
+            selection: selectedBlock ? { block_id: selectedBlock.block_id } : null,
+            show_corrections: true
+        };
+
+        try {
+            var data = await requestApi(API_PREVIEW, {
+                method: 'POST',
+                json: payload,
+                signal: controller.signal
+            });
+            if (requestSeq !== previewSeq) return;
+            applyPreviewPayload(data);
+            clearAlert('preview');
+            var image = currentImage();
+            setHint('预览已更新' + (image ? ' · ' + (image.name || image.id) : '') +
+                '，点击「HSV 分类结果」中的色块进行纠正。', 'ok');
+        } catch (error) {
+            if (error && error.name === 'AbortError') return;
+            if (requestSeq !== previewSeq) return;
+            setFramesLoading(false);
+            ['frame-source', 'frame-classification'].forEach(function (id) {
+                var frame = $(id);
+                if (frame && frame.dataset.loaded !== '1' && !frame.classList.contains('is-loaded')) {
+                    frame.classList.add('is-error');
+                }
+            });
+            reportError('预览生成失败', error, 'preview');
+            setHint('预览生成失败：' + errorMessage(error) + '，可点击「重新预览」重试。', 'error');
+        } finally {
+            if (requestSeq === previewSeq) {
+                previewInflight = null;
+                setFramesLoading(false);
+                syncControls();
+            }
+        }
+    }
+
+    function schedulePreview() {
+        if (debounceId) clearTimeout(debounceId);
+        debounceId = setTimeout(function () {
+            debounceId = null;
+            requestPreview();
+        }, DEBOUNCE_MS);
+    }
+
+    /* =====================================================================
+       四、点击色块 / 纠正 / 自动优化
+       ===================================================================== */
+
+    function openPopover(block) {
+        selectedBlock = block;
+        renderPopover();
+        $('block-popover').hidden = false;
+        var first = $('block-popover').querySelector('.popover-label-btn');
+        if (first && typeof first.focus === 'function') first.focus();
+    }
+
+    function hidePopover() {
+        var pop = $('block-popover');
+        if (pop) pop.hidden = true;
+        document.querySelectorAll('.popover-label-btn').forEach(function (btn) { btn.disabled = false; });
+    }
+
+    function renderPopover() {
+        var block = selectedBlock;
+        if (!block) {
+            hidePopover();
+            return;
+        }
+        setText('popover-title', '色块 #' + block.block_id);
+        var ratioPart = isNum(block.pixel_ratio) ? ('（' + percentText(block.pixel_ratio, 2) + '）') : '';
+        setText('popover-pixels', countText(block.pixel_count) + ratioPart);
+
+        var hsv = Array.isArray(block.mean_hsv) ? block.mean_hsv : null;
+        setText('popover-hsv', hsv ? hsv.join(' / ') : '—');
+
+        var rgb = Array.isArray(block.mean_rgb) ? block.mean_rgb : null;
+        var rgbEl = $('popover-rgb');
+        rgbEl.replaceChildren();
+        if (rgb && rgb.length >= 3) {
+            var swatch = document.createElement('span');
+            swatch.className = 'swatch';
+            swatch.style.background = 'rgb(' + rgb.slice(0, 3).map(function (value) {
+                return Math.round(Number(value) || 0);
+            }).join(',') + ')';
+            rgbEl.appendChild(swatch);
+            rgbEl.appendChild(document.createTextNode(rgb.slice(0, 3).join(' / ')));
+        } else {
+            rgbEl.textContent = '—';
+        }
+
+        setText('popover-predicted', labelCn(block.predicted));
+
+        var correctedEl = $('popover-corrected');
+        correctedEl.replaceChildren();
+        if (block.label) {
+            var dot = document.createElement('span');
+            dot.className = 'swatch';
+            dot.style.background = labelColor(block.label);
+            correctedEl.appendChild(dot);
+            var text = block.label_label || labelCn(block.label);
+            if (block.matches === true) text += '（与判定一致）';
+            else if (block.matches === false) text += '（与判定不一致）';
+            correctedEl.appendChild(document.createTextNode(text));
+        } else {
+            correctedEl.textContent = '未纠正';
+        }
+
+        document.querySelectorAll('.popover-label-btn').forEach(function (btn) {
+            var active = block.label === btn.dataset.label;
+            btn.classList.toggle('is-active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            btn.disabled = correcting;
+        });
+        var cancel = $('btn-cancel-correction');
+        cancel.hidden = !block.label;
+        cancel.disabled = correcting;
+    }
+
+    function syncSelectedBlockFromCorrections() {
+        if (!selectedBlock) return;
+        var blockId = Number(selectedBlock.block_id);
+        var entry = currentCorrections().filter(function (item) {
+            return Number(item.block_id) === blockId;
+        })[0];
+        if (!entry) {
+            selectedBlock.label = null;
+            selectedBlock.label_label = null;
+            selectedBlock.matches = null;
+            return;
+        }
+        selectedBlock.label = entry.label;
+        selectedBlock.label_label = entry.label_cn || labelCn(entry.label);
+        selectedBlock.predicted = entry.current_predicted;
+        selectedBlock.predicted_label = entry.current_predicted_label || labelCn(entry.current_predicted);
+        selectedBlock.matches = entry.matches;
+    }
+
+    async function pickBlockAt(x, y) {
+        if (!currentImageId) {
+            setHint('请先在「1 · 导入卫星图片」中选择一张图片', 'warn');
+            return;
+        }
+        if (blockBusy || correcting) return;
+        blockBusy = true;
+        syncControls();
+        setHint('正在识别点击位置的色块…', 'busy');
+
+        if (previewInflight) {
+            try { previewInflight.abort(); } catch (error) { /* 忽略 */ }
+            previewInflight = null;
+        }
+        var requestSeq = ++previewSeq;
+
+        try {
+            var data = await requestApi(API_BLOCK, {
+                method: 'POST',
+                json: {
+                    image_id: currentImageId,
+                    x: roundTo(clamp(x, 0, 1), 4),
+                    y: roundTo(clamp(y, 0, 1), 4),
+                    ranges: rangesForRequest()
+                }
+            });
+            if (requestSeq !== previewSeq) return;
+            if (data && data.preview) applyImages(data.preview, data.width, data.height);
+
+            if (!data || !data.block) {
+                selectedBlock = null;
+                hidePopover();
+                renderImageBadges();
+                var reason = (data && data.reason) ? String(data.reason) : '该位置没有可标注的色块（可能是自动排除区域、忽略色块或碎片块）';
+                setHint(reason, 'warn');
+                showToast(reason, 'warn');
+                return;
+            }
+
+            openPopover(data.block);
+            renderImageBadges();
+            setHint('已选中色块 #' + data.block.block_id + ' · 当前判定：' + labelCn(data.block.predicted) +
+                '，请指定它的真实类别（快捷键 1–4）。', 'ok');
+            clearAlert('block');
+        } catch (error) {
+            if (error && error.name === 'AbortError') return;
+            if (requestSeq !== previewSeq) return;
+            reportError('识别色块失败', error, 'block');
+            setHint('识别色块失败：' + errorMessage(error) + '，请点击「重新预览」后重试。', 'error');
+        } finally {
+            blockBusy = false;
+            setFramesLoading(false);
+            syncControls();
+        }
+    }
+
+    function syncCorrectionControls() {
+        document.querySelectorAll('.popover-label-btn').forEach(function (btn) { btn.disabled = correcting; });
+        var cancel = $('btn-cancel-correction');
+        if (cancel) cancel.disabled = correcting;
+        var clearBtn = $('btn-clear-corrections');
+        if (clearBtn) clearBtn.disabled = correcting || currentCorrections().length === 0;
+        document.querySelectorAll('[data-remove-correction]').forEach(function (btn) { btn.disabled = correcting; });
+        syncControls();
+    }
+
+    async function saveCorrection(blockId, label) {
+        if (!currentImageId || correcting) return;
+        var imageId = currentImageId;
+        correcting = true;
+        syncCorrectionControls();
+        renderPopover();
+        setHint(label ? ('正在保存纠正：色块 #' + blockId + ' → ' + labelCn(label) + '…') : ('正在取消色块 #' + blockId + ' 的纠正…'), 'busy');
+
+        try {
+            var data = await requestApi(API_CORRECTIONS, {
+                method: 'POST',
+                json: {
+                    image_id: imageId,
+                    block_id: blockId,
+                    label: label || null,
+                    auto_optimize: Boolean($('auto-optimize').checked),
+                    // 面板可能尚未保存：带上当前表单阈值，保证纠正后的预览/优化起点与左侧一致
+                    ranges: rangesForRequest()
+                }
+            });
+            setCorrectionsFor(imageId, data.corrections);
+            if (data.preview) applyImages(data.preview, data.width, data.height);
+            applyMetrics(data.metrics, data.analysis, data.correction_accuracy);
+            syncSelectedBlockFromCorrections();
+            if (selectedBlock) renderPopover();
+            renderThumbs(false);
+            renderImageBadges();
+            renderCorrections();
+            if (data.optimize) {
+                renderOptimize(data.optimize);
+                if (data.optimize.ok) {
+                    setHint('已保存色块 #' + blockId + ' → ' + labelCn(label) + '；自动优化完成：' +
+                        percentText(data.optimize.accuracy_before) + ' → ' + percentText(data.optimize.accuracy_after), 'ok');
+                } else {
+                    setHint('已保存色块 #' + blockId + ' → ' + labelCn(label) + '；' +
+                        (data.optimize.message || '暂无法自动优化'), 'ok');
+                }
+            } else {
+                setHint(label ? ('已保存色块 #' + blockId + ' → ' + labelCn(label)) : ('已取消色块 #' + blockId + ' 的纠正'), 'ok');
+            }
+            if (label) showToast('已标注 #' + blockId + ' 为「' + labelCn(label) + '」', 'ok');
+            else showToast('已取消 #' + blockId + ' 的纠正', 'info');
+            clearAlert('corrections');
+        } catch (error) {
+            reportError('保存纠正失败', error, 'corrections');
+            setHint('保存纠正失败：' + errorMessage(error), 'error');
+        } finally {
+            correcting = false;
+            syncCorrectionControls();
+            if (selectedBlock) renderPopover();
+        }
+    }
+
+    function buildCorrectionChip(item) {
+        var chip = document.createElement('span');
+        chip.className = 'corr-chip' + (item.matches === false ? ' is-mismatch' : '');
+        var predicted = labelCn(item.current_predicted);
+        var matchText = item.matches === true ? '（与当前判定一致）' : (item.matches === false ? '（与当前判定不一致）' : '');
+        chip.title = '色块 #' + item.block_id + ' · 当前判定：' + predicted + matchText;
+
+        var dot = document.createElement('span');
+        dot.className = 'corr-dot';
+        dot.style.background = labelColor(item.label);
+        chip.appendChild(dot);
+
+        var label = document.createElement('span');
+        label.className = 'corr-label';
+        label.textContent = item.label_cn || labelCn(item.label);
+        chip.appendChild(label);
+
+        var id = document.createElement('span');
+        id.className = 'corr-id';
+        id.textContent = '#' + item.block_id;
+        chip.appendChild(id);
+
+        if (isNum(item.pixel_ratio)) {
+            var ratio = document.createElement('span');
+            ratio.className = 'corr-ratio';
+            ratio.textContent = percentText(item.pixel_ratio, 1);
+            chip.appendChild(ratio);
+        }
+
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'corr-remove';
+        remove.dataset.removeCorrection = String(item.block_id);
+        remove.setAttribute('aria-label', '删除色块 #' + item.block_id + ' 的「' + (item.label_cn || labelCn(item.label)) + '」纠正');
+        remove.title = '删除该纠正';
+        remove.textContent = '×';
+        remove.disabled = correcting;
+        chip.appendChild(remove);
+        return chip;
+    }
+
+    function renderCorrections() {
+        var wrap = $('correction-chips');
+        var actions = $('correction-actions');
+        wrap.replaceChildren();
+
+        var image = currentImage();
+        if (!image) {
+            var empty = document.createElement('p');
+            empty.className = 'chip-empty';
+            empty.textContent = '请先导入并选择一张图片。';
+            wrap.appendChild(empty);
+            actions.hidden = true;
+            return;
+        }
+
+        var list = currentCorrections();
+        var summaryCount = Number(image.correction_count) || 0;
+        if (!list.length) {
+            var placeholder = document.createElement('p');
+            placeholder.className = 'chip-empty';
+            placeholder.textContent = summaryCount > 0
+                ? ('该图有 ' + summaryCount + ' 处已保存的纠正，点击色块可查看明细或修改。')
+                : '还没有纠正。点击右侧「HSV 分类结果」中的色块开始标注。';
+            wrap.appendChild(placeholder);
+            actions.hidden = summaryCount === 0;
+        } else {
+            list.forEach(function (item) { wrap.appendChild(buildCorrectionChip(item)); });
+            actions.hidden = false;
+        }
+
+        var clearBtn = $('btn-clear-corrections');
+        clearBtn.textContent = list.length ? ('清空本图纠正（' + list.length + '）') : '清空本图纠正';
+        clearBtn.disabled = correcting || list.length === 0;
+        renderImageBadges();
+    }
+
+    async function clearCorrections() {
+        if (!currentImageId || correcting) return;
+        if (!currentCorrections().length) {
+            showToast('当前图片没有纠正', 'info');
+            return;
+        }
+        if (!window.confirm('确定清空当前图片的全部纠正标注？')) return;
+
+        var imageId = currentImageId;
+        correcting = true;
+        syncCorrectionControls();
+        renderCorrections();
+        setHint('正在清空本图纠正…', 'busy');
+        try {
+            var data = await requestApi(API_CORRECTIONS_CLEAR, {
+                method: 'POST',
+                json: { image_id: imageId, ranges: rangesForRequest() }
+            });
+            setCorrectionsFor(imageId, data.corrections && Array.isArray(data.corrections) ? data.corrections : []);
+            selectedBlock = null;
+            hidePopover();
+            if (data.preview) applyImages(data.preview, data.width, data.height);
+            if (data.metrics || data.analysis) applyMetrics(data.metrics, data.analysis, data.correction_accuracy);
+            renderThumbs(false);
+            renderImageBadges();
+            renderCorrections();
+            setHint('已清空本图 ' + (data.cleared || 0) + ' 条纠正。', 'ok');
+            showToast('已清空本图纠正', 'ok');
+            if (!data.preview) requestPreview();
+            clearAlert('corrections');
+        } catch (error) {
+            reportError('清空纠正失败', error, 'corrections');
+            setHint('清空纠正失败：' + errorMessage(error), 'error');
+        } finally {
+            correcting = false;
+            syncCorrectionControls();
+        }
+    }
+
+    function resetOptimizePanel() {
+        lastOptimize = null;
+        $('opt-panel').hidden = true;
+        setText('optimize-status', '');
+        setText('opt-before', '—');
+        setText('opt-after', '—');
+        setText('opt-delta', '');
+        setText('opt-message', '');
+        $('opt-stats').replaceChildren();
+        $('opt-diffs').replaceChildren();
+        $('opt-diffs').hidden = true;
+        syncControls();
+    }
+
+    // 建议值是否已与左侧面板一致（用于「应用建议值并预览」按钮的可用态）
+    function suggestedMatchesModel() {
+        if (!lastOptimize || !lastOptimize.suggested) return true;
+        var suggested = normalizeRanges(lastOptimize.suggested, defaultsRanges || savedRanges);
+        return rangesKey(suggested) === rangesKey(model);
+    }
+
+    function renderOptimize(result) {
+        if (!result || typeof result !== 'object') {
+            resetOptimizePanel();
+            return;
+        }
+        lastOptimize = result;
+        $('opt-panel').hidden = false;
+
+        var before = result.accuracy_before;
+        var after = result.accuracy_after;
+        setText('opt-before', isNum(before) ? percentText(before) : '—');
+        setText('opt-after', isNum(after) ? percentText(after) : '—');
+
+        var delta = (isNum(before) && isNum(after)) ? (after - before) * 100 : null;
+        var deltaEl = $('opt-delta');
+        deltaEl.textContent = delta === null ? '' : ((delta >= 0 ? '+' : '') + delta.toFixed(1) + ' pp');
+        deltaEl.hidden = delta === null;
+        deltaEl.classList.toggle('is-down', delta !== null && delta < 0);
+
+        var message = $('opt-message');
+        message.textContent = result.message || '';
+        message.classList.toggle('is-warn', !result.ok);
+
+        var statParts = [];
+        if (isNum(result.samples)) statParts.push('样本 ' + countText(result.samples));
+        if (isNum(result.samples_unlabeled)) statParts.push('未标注 ' + countText(result.samples_unlabeled));
+        if (isNum(result.images_used)) statParts.push('图片 ' + result.images_used);
+        if (result.corrections_used !== undefined && result.corrections_used !== null) {
+            statParts.push('纠正 ' + countText(Number(result.corrections_used)));
+        }
+        if (result.class_counts && typeof result.class_counts === 'object') {
+            Object.keys(result.class_counts).forEach(function (key) {
+                statParts.push(labelCn(key) + ' ' + countText(result.class_counts[key]));
+            });
+        }
+        $('opt-stats').textContent = statParts.join(' · ');
+
+        // ok=false 时后端不会给出可用建议（suggested=当前值、diffs=[]），不展示参数变化表
+        if (result.ok) {
+            $('opt-diffs').hidden = false;
+            renderDiffs(result.diffs);
+        } else {
+            $('opt-diffs').hidden = true;
+            $('opt-diffs').replaceChildren();
+        }
+
+        var status = $('optimize-status');
+        if (isNum(before) && isNum(after)) {
+            status.textContent = '上次优化：' + percentText(before) + ' → ' + percentText(after);
+        } else {
+            status.textContent = result.ok ? '优化完成' : '优化未执行';
+        }
+
+        syncControls();
+    }
+
+    function renderDiffs(diffs) {
+        var wrap = $('opt-diffs');
+        wrap.replaceChildren();
+        if (!Array.isArray(diffs) || !diffs.length) {
+            var empty = document.createElement('p');
+            empty.className = 'diff-empty';
+            empty.textContent = (lastOptimize && lastOptimize.ok) ? '参数没有需要调整的地方。' : '没有参数变化。';
+            wrap.appendChild(empty);
+            return;
+        }
+
+        var table = document.createElement('table');
+        table.className = 'diff-table';
+        var thead = document.createElement('thead');
+        var headRow = document.createElement('tr');
+        ['类别', '通道', '值域', '旧值 → 新值'].forEach(function (text) {
+            var th = document.createElement('th');
+            th.scope = 'col';
+            th.textContent = text;
+            headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        diffs.forEach(function (item) {
+            if (!item) return;
+            var tr = document.createElement('tr');
+            [labelCn(item.class), String(item.channel || '—'), BOUND_CN[item.side] || String(item.side || '—')].forEach(function (text) {
+                var td = document.createElement('td');
+                td.textContent = text;
+                tr.appendChild(td);
+            });
+            var valueTd = document.createElement('td');
+            valueTd.className = 'num';
+            var from = document.createElement('span');
+            from.className = 'from';
+            from.textContent = String(item.from);
+            valueTd.appendChild(from);
+            valueTd.appendChild(document.createTextNode(' → '));
+            var to = document.createElement('span');
+            to.className = 'to';
+            to.textContent = String(item.to);
+            valueTd.appendChild(to);
+            tr.appendChild(valueTd);
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+    }
+
+    async function runOptimize() {
+        if (optimizeBusy) return;
+        optimizeBusy = true;
+        var button = $('btn-optimize');
+        button.textContent = '优化中…';
+        syncControls();
+        setHint('正在根据全部纠正样本搜索更优参数（约 1–3 秒）…', 'busy');
+        try {
+            var data = await requestApi(API_OPTIMIZE, {
+                method: 'POST',
+                json: { image_id: currentImageId || null, ranges: rangesForRequest() }
+            });
+            renderOptimize(data.optimize);
+            var optimize = data.optimize || {};
+            if (optimize.ok) {
+                showToast(optimize.message || '优化完成', optimize.improved ? 'ok' : 'info');
+                setHint(optimize.message || '优化完成', optimize.improved ? 'ok' : 'warn');
+            } else {
+                showToast(optimize.message || '至少需要标注两种类别的色块才能自动优化', 'warn');
+                setHint(optimize.message || '至少需要标注两种类别的色块才能自动优化', 'warn');
+            }
+            clearAlert('optimize');
+        } catch (error) {
+            reportError('自动优化失败', error, 'optimize');
+            setHint('自动优化失败：' + errorMessage(error), 'error');
+        } finally {
+            optimizeBusy = false;
+            button.textContent = '立即优化';
+            syncControls();
+        }
+    }
+
+    function applySuggestedRanges() {
+        if (!lastOptimize || !lastOptimize.suggested) return;
+        if (!lastOptimize.ok) {
+            showToast('本次优化没有产生可用建议', 'warn');
+            return;
+        }
+        var suggested = normalizeRanges(lastOptimize.suggested, defaultsRanges || savedRanges);
+        if (rangesKey(suggested) === rangesKey(model)) {
+            showToast('建议值与当前面板一致，无需应用', 'info');
+            return;
+        }
+        applyBusy = true;
+        syncControls();
+        model = suggested;
+        touched = true;
+        paintModel();
+        refreshBands();
+        var errors = updateValidation();
+        updateDirty();
+        syncSaveButton(errors);
+        schedulePreview();
+        setSaveNote('已填入建议参数（尚未保存）');
+        setHint('已应用建议参数并重新预览；确认无误后点「保存并立即生效」写入数据库。', 'ok');
+        showToast('已应用建议参数并重新预览', 'ok');
+        applyBusy = false;
+        syncControls();
+        var dock = $('btn-save');
+        if (dock && !dock.disabled && typeof dock.focus === 'function') dock.focus();
+    }
+
+    /* ---------------- 统一按钮状态 ---------------- */
+    function syncControls() {
+        var dropzone = $('dropzone');
+        if (dropzone) {
+            dropzone.setAttribute('aria-busy', importing ? 'true' : 'false');
+            dropzone.classList.toggle('is-uploading', importing);
+        }
+        var pick = $('btn-pick-files');
+        if (pick) pick.disabled = importing;
+        var fileInput = $('file-input');
+        if (fileInput) fileInput.disabled = importing;
+        var clearImagesBtn = $('btn-clear-images');
+        if (clearImagesBtn) clearImagesBtn.disabled = importing || clearLoading || lab.images.length === 0;
+        document.querySelectorAll('.thumb-del').forEach(function (btn) { btn.disabled = importing; });
+
+        var hasImage = Boolean(currentImage());
+        var repreview = $('btn-repreview');
+        if (repreview) repreview.disabled = !hasImage || blockBusy || importing;
+
+        var autoOpt = $('auto-optimize');
+        if (autoOpt) autoOpt.disabled = importing;
+
+        var optimizeBtn = $('btn-optimize');
+        if (optimizeBtn) {
+            optimizeBtn.disabled = optimizeBusy || !labLoaded;
+            if (!optimizeBusy) optimizeBtn.textContent = '立即优化';
+        }
+
+        var applyBtn = $('btn-apply-suggested');
+        if (applyBtn) {
+            var hasSuggestion = Boolean(lastOptimize && lastOptimize.ok);
+            var differs = hasSuggestion && !suggestedMatchesModel();
+            applyBtn.disabled = applyBusy || !differs;
+            if (!lastOptimize) applyBtn.title = '先完成一次自动优化';
+            else if (!lastOptimize.ok) applyBtn.title = '本次优化没有可用的建议值';
+            else if (!differs) applyBtn.title = '建议值已与当前面板一致';
+            else applyBtn.title = '把建议阈值填入左侧面板并重新预览（仍需点「保存并立即生效」才写入数据库）';
+        }
+
+        var clearCorr = $('btn-clear-corrections');
+        if (clearCorr) clearCorr.disabled = correcting || currentCorrections().length === 0;
+    }
+
+    /* =====================================================================
+       五、事件绑定与启动
+       ===================================================================== */
     function bindEvents() {
         var controls = $('controls');
         controls.addEventListener('input', function (event) {
@@ -2724,8 +3700,6 @@
             if (!target.dataset.role) return;
             handleControlInput(target);
         });
-        // 数字输入框失焦时把 0 以上的空值视为未完成输入；这里仅在控件之间做轻量规范化，
-        // 真正的合法性判断仍交给 validateModel，避免静默改写用户输入。
         controls.addEventListener('change', function (event) {
             var target = event.target;
             if (target instanceof HTMLInputElement && target.dataset.role === 'num') {
@@ -2735,65 +3709,151 @@
 
         $('btn-save').addEventListener('click', function () { void save(); });
         $('btn-reset').addEventListener('click', function () { void resetToDefaults(); });
-        $('btn-rerun').addEventListener('click', function () { void requestPreview(); });
-        $('btn-refresh-sources').addEventListener('click', function () { void refreshSources(); });
         $('btn-load-defaults').addEventListener('click', function () { loadDefaults(null); });
         $('alert-close').addEventListener('click', hideAlert);
         document.querySelectorAll('[data-action="load-defaults"]').forEach(function (button) {
             button.addEventListener('click', function () { loadDefaults(button.dataset.class); });
         });
 
-        $('btn-pick-datetime').addEventListener('click', function () { pickDatetime(); });
-        $('source-datetime').addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                pickDatetime();
-            }
+        /* ---- 导入：拖放 / 文件选择 ---- */
+        var dropzone = $('dropzone');
+        $('btn-pick-files').addEventListener('click', function (event) {
+            event.stopPropagation();
+            if (!importing) $('file-input').click();
         });
-        $('dt-suggestions').addEventListener('click', function (event) {
-            var button = event.target.closest('.dt-suggestion');
-            if (!button) return;
-            if (selectSource(button.dataset.sourceId, {})) setDtHint('已选用最近可用的时间点', 'ok');
+        dropzone.addEventListener('click', function (event) {
+            if (event.target.closest('button')) return;
+            if (!importing) $('file-input').click();
         });
-
-        $('source-list').addEventListener('click', function (event) {
-            var item = event.target.closest('.source-item');
-            if (!item) return;
-            if (selectSource(item.dataset.sourceId, {})) setDtHint('已选用该时间点', 'ok');
-        });
-        $('source-list').addEventListener('keydown', function (event) {
+        dropzone.addEventListener('keydown', function (event) {
             if (event.key !== 'Enter' && event.key !== ' ') return;
-            var item = event.target.closest('.source-item');
-            if (!item) return;
+            if (event.target.closest('button')) return;
             event.preventDefault();
-            if (selectSource(item.dataset.sourceId, {})) setDtHint('已选用该时间点', 'ok');
+            if (!importing) $('file-input').click();
         });
-
-        $('tag-filter').addEventListener('click', function (event) {
-            var chip = event.target.closest('.tag-filter-chip');
-            if (!chip) return;
-            setTagFilter(chip.dataset.filterTag || '');
-        });
-        $('tag-current-chips').addEventListener('click', function (event) {
-            var button = event.target.closest('[data-remove-tag]');
-            if (!button) return;
-            removeTag(button.dataset.removeTag);
-        });
-        $('tag-presets').addEventListener('click', function (event) {
-            var button = event.target.closest('[data-add-tag]');
-            if (!button) return;
-            addTag(button.dataset.addTag);
-        });
-        $('btn-add-tag').addEventListener('click', addTagFromInput);
-        $('tag-input').addEventListener('keydown', function (event) {
-            // 标签输入框内 Enter 只添加 tag，不触发阈值保存（Ctrl/Cmd+S 仍保存阈值）
-            if (event.key === 'Enter') {
+        ['dragenter', 'dragover'].forEach(function (type) {
+            dropzone.addEventListener(type, function (event) {
+                if (importing) return;
                 event.preventDefault();
-                addTagFromInput();
+                event.stopPropagation();
+                dropzone.classList.add('is-dragover');
+            });
+        });
+        ['dragleave', 'dragend'].forEach(function (type) {
+            dropzone.addEventListener(type, function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.target === dropzone) dropzone.classList.remove('is-dragover');
+            });
+        });
+        dropzone.addEventListener('drop', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            dropzone.classList.remove('is-dragover');
+            if (importing) {
+                showToast('正在导入中，请稍候', 'warn');
+                return;
+            }
+            var files = event.dataTransfer ? event.dataTransfer.files : null;
+            if (files && files.length) void uploadFiles(files);
+        });
+        document.addEventListener('dragover', function (event) { event.preventDefault(); });
+        document.addEventListener('drop', function (event) {
+            if (event.target && event.target.closest && event.target.closest('#dropzone')) return;
+            event.preventDefault();
+            if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length) {
+                showToast('请把文件拖到「导入卫星图片」的拖放区', 'info');
             }
         });
-        $('btn-save-tags').addEventListener('click', function () { void saveTags(); });
+        $('file-input').addEventListener('change', function (event) {
+            var files = event.target.files;
+            if (files && files.length) void uploadFiles(files);
+            event.target.value = '';
+        });
 
+        /* ---- 缩略图条 ---- */
+        $('thumb-strip').addEventListener('click', function (event) {
+            var del = event.target.closest('[data-remove-image-id]');
+            if (del) {
+                event.stopPropagation();
+                void removeImage(del.dataset.removeImageId);
+                return;
+            }
+            var thumb = event.target.closest('.thumb');
+            if (thumb) selectImage(thumb.dataset.imageId);
+        });
+        $('thumb-strip').addEventListener('keydown', function (event) {
+            var thumb = event.target.closest('.thumb');
+            if (!thumb) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectImage(thumb.dataset.imageId);
+            } else if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                void removeImage(thumb.dataset.imageId);
+            }
+        });
+        $('btn-clear-images').addEventListener('click', function () { void clearImages(); });
+
+        /* ---- 分类图点击 ---- */
+        $('img-classification').addEventListener('click', function (event) {
+            var img = event.currentTarget;
+            if (!img || !img.naturalWidth || !img.naturalHeight) return;
+            var rect = img.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            if (event.clientX < rect.left || event.clientX > rect.right ||
+                event.clientY < rect.top || event.clientY > rect.bottom) return;
+            var x = (event.clientX - rect.left) / rect.width;
+            var y = (event.clientY - rect.top) / rect.height;
+            void pickBlockAt(x, y);
+        });
+        $('img-classification').addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            setHint('请用鼠标点击「HSV 分类结果」图中要纠正的色块。', 'muted');
+        });
+
+        /* ---- 色块浮层 ---- */
+        $('block-popover').addEventListener('click', function (event) {
+            var labelBtn = event.target.closest('.popover-label-btn');
+            if (labelBtn && selectedBlock && !correcting) {
+                void saveCorrection(selectedBlock.block_id, labelBtn.dataset.label);
+                return;
+            }
+            if (event.target.closest('#btn-cancel-correction') && selectedBlock && !correcting) {
+                void saveCorrection(selectedBlock.block_id, null);
+                return;
+            }
+            if (event.target.closest('#btn-close-popover')) {
+                hidePopover();
+                setHint('已关闭色块浮层。点击分类结果图中的任意色块可继续标注。', 'muted');
+            }
+        });
+
+        /* ---- 纠正 chips ---- */
+        $('correction-chips').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-remove-correction]');
+            if (!button || correcting) return;
+            var blockId = Number(button.dataset.removeCorrection);
+            if (!isFinite(blockId)) return;
+            void saveCorrection(blockId, null);
+        });
+        $('btn-clear-corrections').addEventListener('click', function () { void clearCorrections(); });
+
+        /* ---- 自动优化 ---- */
+        $('auto-optimize').addEventListener('change', function () {
+            setHint($('auto-optimize').checked
+                ? '已开启：每次标注后自动优化参数。'
+                : '已关闭：标注后需手动点「立即优化」。', 'muted');
+        });
+        $('btn-optimize').addEventListener('click', function () { void runOptimize(); });
+        $('btn-apply-suggested').addEventListener('click', applySuggestedRanges);
+        $('btn-repreview').addEventListener('click', function () {
+            firstPreview = false;
+            void requestPreview();
+        });
+
+        /* ---- 全局键盘 ---- */
         document.addEventListener('keydown', function (event) {
             var modifier = event.ctrlKey || event.metaKey;
             if (modifier && (event.key === 's' || event.key === 'S')) {
@@ -2801,7 +3861,29 @@
                 if (!saving) void save();
                 return;
             }
-            if (event.key === 'Escape' && !$('alert-box').hidden) hideAlert();
+            if (event.key === 'Escape') {
+                if (!$('block-popover').hidden) {
+                    hidePopover();
+                    setHint('已关闭色块浮层。', 'muted');
+                    return;
+                }
+                if (!$('alert-box').hidden) {
+                    hideAlert();
+                    return;
+                }
+                return;
+            }
+            if ($('block-popover').hidden) return;
+            var target = event.target;
+            var tag = (target && target.tagName) ? target.tagName.toLowerCase() : '';
+            var typing = tag === 'input' || tag === 'textarea' || tag === 'select' ||
+                (target && target.isContentEditable);
+            if (typing || modifier || event.altKey) return;
+            var label = SHORTCUT_LABEL[event.key];
+            if (label && selectedBlock && !correcting) {
+                event.preventDefault();
+                void saveCorrection(selectedBlock.block_id, label);
+            }
         });
 
         // 兜底：任何漏网的 Promise 拒绝都会以 toast 呈现，页面不会静默卡住
@@ -2812,18 +3894,23 @@
         });
     }
 
-    /* ---------------- 启动 ---------------- */
     async function loadInitial() {
-        setHint('正在读取阈值配置与可用时间点…', 'busy');
-        var results = await Promise.all([loadState(), loadSources()]);
-        var sourcesOk = results[1];
-        if (sourcesOk && currentSource) {
-            await requestPreview();
-        } else if (!sourcesOk) {
-            setHint('预览源不可用，可点击「刷新列表」重试；阈值的读取与保存不受影响。', 'error');
+        setHint('正在读取阈值配置与图片实验台状态…', 'busy');
+        var results = await Promise.all([loadState(), loadLab()]);
+        var stateOk = results[0];
+        var labOk = results[1];
+        if (!stateOk) setSaveNote('阈值配置读取失败，保存功能暂不可用');
+
+        if (labOk) {
+            if (lab.images.length) {
+                selectImage(lab.images[0].id);
+            } else {
+                clearPreviewUi('还没有导入图片。拖入单张图片，或选择一个 ZIP 批量导入。');
+            }
         } else {
-            setHint('没有可用的分析时间点，无法生成预览', 'warn');
+            clearPreviewUi('图片实验台暂不可用，请稍后刷新重试。');
         }
+        renderAllLab();
     }
 
     function init() {
@@ -2843,6 +3930,10 @@
             syncSaveButton(errors);
         }
 
+        renderLabelButtons();
+        renderAllLab();
+        clearPreviewUi('正在读取实验台状态…');
+        syncControls();
         void loadInitial();
     }
 

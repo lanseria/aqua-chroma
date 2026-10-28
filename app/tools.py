@@ -2,13 +2,14 @@
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 
 # 假设主应用中已经定义了 templates
 # 如果没有，您需要在 main.py 中进行配置
@@ -16,8 +17,7 @@ templates = Jinja2Templates(directory="templates")
 
 # 导入新的、独立的 pipeline 模块
 from .pipeline import process_image_pipeline
-from . import config, crud, settings_store, threshold_preview
-from .database import SessionLocal
+from . import color_lab, settings_store
 
 # 定义测试图片和结果的目录
 TEST_IMAGE_DIR = Path("test_images")
@@ -47,76 +47,39 @@ class ColorThresholdsUpdateRequest(BaseModel):
     ranges: Dict[str, Any]
 
 
-class ThresholdPreviewRequest(BaseModel):
-    source: str
+class LabPreviewRequest(BaseModel):
+    image_id: str
+    ranges: Optional[Dict[str, Any]] = None
+    selection: Optional[Dict[str, Any]] = None
+    show_corrections: bool = True
+
+
+class LabBlockRequest(BaseModel):
+    image_id: str
+    x: float
+    y: float
     ranges: Optional[Dict[str, Any]] = None
 
 
-class PreviewTagsUpdateRequest(BaseModel):
-    # 故意用 Any + 默认 None 接收：timestamp 非 int/bool、tags 非数组、字段缺失等
-    # 结构问题也要转成我们的 400 + 中文 details，而不是 Pydantic 的 422
-    #（若声明为 int / List[Any]，bool 会被强转、非数组/缺失会在进入校验前被拦截）。
-    timestamp: Any = None
-    tags: Any = None
+class LabCorrectionRequest(BaseModel):
+    image_id: str
+    block_id: int
+    label: Optional[str] = None
+    auto_optimize: bool = True
+    # 可选：页面当前表单里的阈值（可能尚未保存），作为预览与自动优化的起点
+    ranges: Optional[Dict[str, Any]] = None
 
 
-# --- 预览源 tag 校验 ---
+class LabOptimizeRequest(BaseModel):
+    image_id: Optional[str] = None
+    # 可选：优化起点 / 对照基准，缺省用当前生效阈值
+    ranges: Optional[Dict[str, Any]] = None
 
-def _validate_preview_tags_payload(timestamp: Any, tags: Any) -> Tuple[List[str], List[str]]:
-    """
-    校验「保存某个分析结果时间点的 tag」请求。
 
-    收集全部错误（不是遇到第一个就返回），错误信息为中文，供前端逐条展示。
-    tags 去重时保留首次出现顺序。
-
-    Returns:
-        (规范化后的 tags, 错误列表)；错误列表非空时调用方返回 400。
-    """
-    errors: List[str] = []
-
-    # 1. 时间戳：必须是 int（bool 不算），且该时间点有可用的分析结果图像
-    if isinstance(timestamp, bool) or not isinstance(timestamp, int):
-        errors.append(f"timestamp 必须是整数（UNIX 秒），实际为 {timestamp!r}")
-    else:
-        if not threshold_preview.analysis_source_exists(timestamp):
-            artifact = threshold_preview.analysis_artifact_path(timestamp)
-            errors.append(
-                f"时间戳 {timestamp} 没有可用的分析结果图像（{artifact.as_posix()} 不存在）"
-            )
-
-    # 2. tags：必须是 list，元素为 strip 后非空、长度受限的字符串
-    normalized: List[str] = []
-    if not isinstance(tags, list):
-        errors.append(f"tags 必须是字符串数组（list），实际为 {type(tags).__name__}")
-        return normalized, errors
-
-    seen = set()
-    for index, item in enumerate(tags):
-        if not isinstance(item, str):
-            errors.append(f"tags[{index}] 必须是字符串，实际为 {item!r}")
-            continue
-        tag = item.strip()
-        if not tag:
-            errors.append(f"tags[{index}] 不能为空字符串")
-            continue
-        if len(tag) > config.PREVIEW_TAG_MAX_LENGTH:
-            errors.append(
-                f"tags[{index}] 长度 {len(tag)} 超过上限 "
-                f"{config.PREVIEW_TAG_MAX_LENGTH} 个字符：{tag}"
-            )
-            continue
-        if tag in seen:
-            continue  # 重复项静默去重，保留首次出现顺序
-        seen.add(tag)
-        normalized.append(tag)
-
-    if len(normalized) > config.PREVIEW_TAG_MAX_COUNT:
-        errors.append(
-            f"单个时间点最多 {config.PREVIEW_TAG_MAX_COUNT} 个 tag"
-            f"（去重后实际 {len(normalized)} 个）"
-        )
-
-    return normalized, errors
+class LabClearCorrectionsRequest(BaseModel):
+    image_id: Optional[str] = None
+    # 可选：页面当前表单里的阈值，用于渲染清空后的预览
+    ranges: Optional[Dict[str, Any]] = None
 
 
 @router.get("/hsv_tuner", response_class=HTMLResponse)
@@ -262,81 +225,135 @@ def api_reset_color_thresholds():
     return {"success": True, "data": state}
 
 
-@router.get("/api/preview_sources")
-def api_preview_sources():
-    """
-    列出全部可预览的分析结果时间点（时间倒序、含各自 tags），
-    以及全库 tag 统计、页面录入候选、总数/截断标记。
-    """
-    return {"success": True, "data": threshold_preview.list_sources()}
+# =================================================================
+#  颜色阈值智能调优实验台（导入卫星图片 → 点击色块纠正 → 自动优化 HSV）
+#  页面：/tools/color_thresholds    设计/接口说明：docs/color-thresholds-lab.md
+# =================================================================
+
+def _lab_error_response(exc: Exception) -> JSONResponse:
+    """把实验台的业务异常映射成 {success:false, error, details?} 的 HTTP 响应。"""
+    status = getattr(exc, "status_code", 400)
+    content: Dict[str, Any] = {"success": False, "error": str(exc)}
+    if isinstance(exc, settings_store.SettingsValidationError):
+        content["error"] = "HSV 阈值不合法"
+        content["details"] = exc.errors
+    return JSONResponse(status_code=int(status), content=content)
 
 
-@router.get("/api/preview_tags")
-def api_preview_tags():
-    """列出全库预览源 tag 的使用统计（打该 tag 的时间点数量）与页面录入候选。"""
+@router.get("/api/color_thresholds/lab")
+def api_lab_state():
+    """实验台初始状态：已导入图片列表、上传限制、可用的纠正类别。"""
     try:
-        with SessionLocal() as db:
-            counts = crud.list_preview_tag_counts(db)
-    except Exception as exc:
-        return JSONResponse(status_code=500, content={
-            "success": False,
-            "error": f"读取预览标签失败: {exc}",
-        })
-
-    return {"success": True, "data": {
-        "tags": [{"tag": tag, "count": int(count)} for tag, count in counts],
-        "presets": list(config.PREVIEW_TAG_PRESETS),
-    }}
-
-
-@router.post("/api/preview_tags")
-def api_update_preview_tags(payload: PreviewTagsUpdateRequest):
-    """
-    替换式保存某个分析结果时间点的 tag（tags=[] 表示清空该时间点全部 tag）。
-
-    校验不通过 -> 400 + 逐条中文 details；数据库写入失败 -> 500。
-    """
-    normalized, errors = _validate_preview_tags_payload(payload.timestamp, payload.tags)
-    if errors:
-        return JSONResponse(status_code=400, content={
-            "success": False,
-            "error": "预览标签不合法",
-            "details": errors,
-        })
-
-    try:
-        with SessionLocal() as db:
-            saved = crud.set_preview_tags(db, payload.timestamp, normalized)
-    except Exception as exc:
-        return JSONResponse(status_code=500, content={
-            "success": False,
-            "error": f"保存预览标签失败: {exc}",
-        })
-
-    return {"success": True, "data": {
-        "timestamp": payload.timestamp,
-        "tags": saved,
-    }}
-
-
-@router.post("/api/threshold_preview")
-def api_threshold_preview(payload: ThresholdPreviewRequest):
-    """
-    实时预览：对指定图像源用给定阈值（不传 ranges 则用当前生效值）执行
-    分类 + 着色 + 指标计算，返回 base64 PNG 与指标；不写文件、不改配置。
-    """
-    try:
-        data = threshold_preview.render_preview(payload.source, payload.ranges)
-    except settings_store.SettingsValidationError as exc:
-        # 注意：SettingsValidationError 是 ValueError 的子类，必须放在前面捕获
-        return JSONResponse(status_code=400, content={
-            "success": False,
-            "error": "HSV 阈值不合法",
-            "details": exc.errors,
-        })
-    except ValueError as exc:
-        return JSONResponse(status_code=400, content={
-            "success": False,
-            "error": str(exc),
-        })
+        data = color_lab.get_lab_state()
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
     return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/images")
+async def api_lab_import_image(request: Request, filename: str = ""):
+    """
+    导入图片：请求体是原始文件二进制（单张图片或一个 ZIP），filename 从查询参数传入。
+
+    刻意不走 multipart 表单，避免引入 python-multipart 依赖；ZIP 内的条目逐个导入。
+    """
+    raw = await request.body()
+    try:
+        data = await run_in_threadpool(color_lab.import_upload, raw, filename or "upload.png")
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.delete("/api/color_thresholds/images/{image_id}")
+def api_lab_delete_image(image_id: str):
+    """删除一张已导入图片（含其纠正数据）。"""
+    try:
+        data = color_lab.delete_image(image_id)
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/images/clear")
+def api_lab_clear_images():
+    """清空全部已导入图片。"""
+    try:
+        data = color_lab.clear_images()
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/preview")
+def api_lab_preview(payload: LabPreviewRequest):
+    """
+    用给定阈值（缺省 = 当前生效阈值）渲染某张导入图片的分类结果与指标。
+
+    ranges 只用于预览，不会保存；保存阈值请用 POST /api/color_thresholds。
+    """
+    try:
+        data = color_lab.render_preview(
+            payload.image_id,
+            payload.ranges,
+            payload.selection,
+            payload.show_corrections,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/block")
+def api_lab_pick_block(payload: LabBlockRequest):
+    """点击色块：x/y 为相对预览图的归一化坐标（0~1），返回整块色块信息与高亮预览。"""
+    try:
+        data = color_lab.pick_block(payload.image_id, payload.x, payload.y, payload.ranges)
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/corrections")
+def api_lab_set_correction(payload: LabCorrectionRequest):
+    """
+    保存 / 取消某个色块的纠正（label=null 表示取消）。
+
+    auto_optimize=true 时会顺带跑一次自动优化，把建议参数放在返回的 optimize 字段里；
+    优化结果不会落库，需要页面另行「保存并立即生效」。
+    """
+    try:
+        data = color_lab.set_correction(
+            payload.image_id,
+            payload.block_id,
+            payload.label,
+            payload.auto_optimize,
+            payload.ranges,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/corrections/clear")
+def api_lab_clear_corrections(payload: LabClearCorrectionsRequest):
+    """清空某张图（传 image_id）或全部图片的纠正。"""
+    try:
+        data = color_lab.clear_corrections(payload.image_id, payload.ranges)
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/api/color_thresholds/optimize")
+def api_lab_optimize(payload: LabOptimizeRequest):
+    """根据全部图片上的纠正样本自动搜索更优的 HSV 阈值（只返回建议，不落库）。"""
+    try:
+        optimize = color_lab.optimize_ranges(payload.ranges)
+    except Exception as exc:  # noqa: BLE001
+        return _lab_error_response(exc)
+    return {"success": True, "data": {
+        "optimize": optimize,
+        "images_used": optimize.get("images_used", 0),
+        "corrections_used": optimize.get("corrections_used", 0),
+    }}
