@@ -18,6 +18,10 @@ def get_all_results(db: Session):
     """获取所有分析结果。"""
     return db.query(models.AnalysisResult).order_by(models.AnalysisResult.timestamp.desc()).all()
 
+def count_analysis_results(db: Session) -> int:
+    """统计分析结果总条数（启动时用于交叉校验输出目录是否与之匹配）。"""
+    return int(db.query(models.AnalysisResult).count())
+
 def get_processed_timestamps(db: Session):
     """获取所有已成功处理的时间戳集合（失败状态的时间戳不包含，以便调度器重试）。"""
     rows = db.query(models.AnalysisResult.timestamp, models.AnalysisResult.status).all()

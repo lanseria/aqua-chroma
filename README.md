@@ -218,6 +218,38 @@ uv run python scripts/migrate_add_preview_tags.py
 
 tag 为空即表示该时间点未归类；调优页可按 tag 过滤时间点。测试图片（`test_images/`）只服务于旧的 `/tools/hsv_tuner` 批量调参页，不再出现在阈值实时调优页的预览源中。
 
+### 排查：分析图片没有出现在宿主机目录（Docker）
+
+分析产物写入容器内 `/app/data/output/<timestamp>/`，该目录由 `docker-compose.yml` 的
+`${TILES_HOST_PATH:-aqua-chroma-data}:/app/data` 挂载到宿主机。
+
+**`TILES_HOST_PATH` 必须写在 `docker compose` 会读取的位置**——项目目录下与 `docker-compose.yml`
+同级的 `.env`，或 shell 环境变量。写在 `env_file`（`.env.production`）里**不会**参与 compose 的变量替换，
+此时 compose 会静默回退到命名卷（`aqua-chroma_aqua-chroma-data`），图片写进卷内，宿主机目录看起来
+"一张新图都没有"（但分析日志一切正常）。
+
+排查与修复：
+
+```bash
+# 1) 看 compose 解析后的卷类型：期望 type: bind、source 为宿主路径
+docker compose config | grep -A4 volumes
+
+# 2) 看容器实际挂载来源
+docker inspect aqua-chroma-app --format '{{json .Mounts}}'
+
+# 3) 看容器内是否真的有图
+docker exec aqua-chroma-app ls -la /app/data/output | tail
+
+# 4) 修复：把 TILES_HOST_PATH 写进 .env 后重建容器（无需重新构建镜像）
+docker compose up -d --force-recreate --no-build
+```
+
+应用启动日志会打印 `[Storage]` 开头的诊断行（输出目录绝对路径、挂载来源、是否可写、已有时间戳目录数），
+并在"数据库有记录但输出目录为空"时给出明确告警；运行中也可访问 `GET /api/debug/storage` 查看同样信息。
+
+> 从命名卷切回宿主机目录时，切换期间写进旧卷的图片不会自动出现。可用临时容器补拷（不覆盖已有文件）：
+> `docker run --rm --entrypoint sh -v aqua-chroma_aqua-chroma-data:/from:ro -v /宿主路径:/to aqua-chroma -c 'cd /from/output && tar -cf - . | tar -C /to/output --skip-old-files -xf -'`
+
 ---
 
 ## 📂 项目结构

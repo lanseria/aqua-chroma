@@ -61,5 +61,6 @@ uv sync --locked
 - 数据库 Schema 变更时需同步编写 `scripts/migrate_*.py` 幂等迁移脚本（参考 `migrate_add_visibility_columns.py`），存量数据无法回填的列保持 NULL
 - HSV 颜色阈值是运行时配置（`app_settings` 表中的 JSON），不要写进 `.env` 或硬编码进 `config.py`；新增可调参数时按 `settings_store.py` 的模式扩展（校验 + 持久化 + 缓存失效），调试用临时阈值通过 `hsv_ranges_override` 参数传入，落到生产上的改动一律走页面/API 保存
 - 阈值实时预览只接受分析结果源：`data/output/<ts>/03_ocean_only.png`（预处理缓存命中后毫秒级）；`test_images/` 只服务于旧的 `/tools/hsv_tuner` 批量调参页，不再出现在实时调优页的预览源中
+- Docker 部署的图片挂载：`TILES_HOST_PATH` 必须写在 compose 项目级 `.env` 或 shell 环境变量（`env_file: .env.production` 里的同名变量不参与卷替换，会静默回落命名卷）；启动日志的 `[Storage]` 行与 `GET /api/debug/storage` 可查看输出目录绝对路径、挂载来源、可写性与已有时间戳目录数
 - 预览源 tag 是用户数据（`preview_tags` 表，一个时间点可多个 tag）：用于把真实分析结果按场景归类（晴朗天空/多云/薄雾…）当"分类型测试样本"；新增/修改预设 tag 改 `config.PREVIEW_TAG_PRESETS`，校验常量在同处（长度/数量上限）
 - 新增数据库表时同时更新 `app/models.py` 与迁移脚本；`init_db()` 启动时也会 `create_all` 自动建表
