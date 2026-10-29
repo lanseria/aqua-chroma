@@ -11,8 +11,9 @@
 ```
 导入卫星图片（单张 / 多张 / ZIP 批量）
   → 后端自动缩放并生成分析输入（source.png、缩略图）
+  → 与监控范围同比例的图片按 GeoJSON 生成陆地遮罩（陆地不参与分析）
   → 用「当前生效的 HSV 参数」自动分类渲染（云层 / 蓝海 / 黄海）
-  → 用户发现某块区域分错了：点击结果图上那个色块
+  → 用户发现某块区域分错了：鼠标悬停查看色块信息，点击那个色块
   → 选择它真实的类别（云层 / 蓝海 / 黄海 / 忽略）
   → 后端把所有图片上的纠正样本汇总，自动搜索更优的 HSV 参数
   → 页面回填建议参数并实时重算，用户确认后「保存并立即生效」（写 app_settings，生产立即采用）
@@ -22,6 +23,10 @@
 
 - **色块（color block）**：后端在导入时用 Lab 空间聚类（K=14）+ 连通域把图片切成一块块
   颜色相近的连通区域。用户点击结果图时，命中的是整个色块，而不是单个像素。
+- **陆地遮罩（land mask）**：导入图若与监控范围（`config.TARGET_AREA`）长宽比一致
+  （容差 `config.TOOL_GEO_MASK_ASPECT_TOLERANCE`），导入时按 `config.GEOJSON_PATH`
+  生成与图片同尺寸的海洋蒙版，**陆地（mask=0）从色块划分、分类与指标统计中排除**，
+  分类图中渲染为深灰。比例不一致的图不硬套遮罩，以免把画面切错。
 - **纠正（correction）**：`{block_id, label}`。label 取值 `CLOUD` / `BLUE_WATER` /
   `YELLOW_WATER` / `IGNORE`（忽略 = 非海域/陆地，排除出指标统计）。
 - **自动优化**：把全部导入图片上的纠正色块像素当作**用户标注样本**，同时从同一批图中
@@ -59,11 +64,15 @@
 - 「清空全部」按钮（需确认；`confirm()` 即可）。
 
 **卡片 2「2 · 色块纠正」**
-- 头部：当前图片名 + 尺寸；徽标：色块数 / 已纠正数 / 忽略占比 / 纠正符合率。
+- 头部：当前图片名 + 尺寸；徽标：色块数 / `陆地已遮罩`（仅套用遮罩时显示）/ 已纠正数 /
+  忽略占比 / 纠正符合率。
 - 两图并排：
   - 左：`分析输入`（source_preview，只读）。
   - 右：`HSV 分类结果`（classification，**可点击**）。鼠标样式 `crosshair`；
-    未选图时显示空态。
+    未选图时显示空态。陆地/无效区域渲染为深灰，不参与分类。
+- **悬停查看**：鼠标移到分类图上（防抖约 110 ms）会浮出信息提示，跟随光标显示
+  `色块 #id`、像素数/占比、均值 HSV / RGB、当前判定、已有纠正；悬停不改变选中状态，
+  也不触发重绘。命中陆地/纯黑区域或碎片块时提示原因。
 - 点击分类图 → 请求 `POST .../block`，在图上叠加选中色块描边，并弹出「色块操作浮层」
   （固定在图片右下角或跟随点击位置均可）：
   - 显示 `色块 #id`、像素数、占比、均值 HSV / RGB、当前判定类别；
@@ -79,7 +88,7 @@
     （类别/通道/旧值→新值）、提示语；按钮 `应用建议值并预览`（自动模式下也保留，
     用于重新应用）；若 `ok=false` 显示 `message`（如「至少需要标注两种类别」）。
 - 标注说明文字：`绿色描边 = 当前参数判定与纠正一致；橙色描边 = 不一致（优化目标）；
-  灰色描边 = 已标记为忽略`。
+  灰色描边 = 已标记为忽略；深灰 = 陆地/无效区域（已遮罩）`。
 
 **卡片 3「分析指标」**：沿用现有指标网格；文案改为「分析像素」（= totalOceanPixels），
 新增「纠正符合率」「忽略占比」两个指标；含义不明的指标显示 `—`。
@@ -152,7 +161,8 @@ Base：`/tools/api/color_thresholds`
   "source": "file",              // 或 "zip:sub/dir/cloudy_02.png"
   "correction_count": 3,
   "block_count": 148,
-  "ignored_ratio": 0.12
+  "ignored_ratio": 0.12,
+  "land_masked": true            // 是否套用了监控范围的陆地遮罩
 }
 ```
 
@@ -208,7 +218,8 @@ Base：`/tools/api/color_thresholds`
   "analysis": {
     "analyzed_pixels": 161000, "auto_excluded_pixels": 500,
     "ignored_pixels": 12000, "ignored_ratio": 0.046,
-    "total_pixels": 256000, "block_count": 148, "correction_accuracy": 0.93
+    "total_pixels": 256000, "block_count": 148, "correction_accuracy": 0.93,
+    "land_masked": true, "land_pixels": 84000
   },
   "corrections": [Correction, "..."],
   "elapsedMs": 87
@@ -219,18 +230,24 @@ Base：`/tools/api/color_thresholds`
 `corrections` 是**当前图片的完整纠正明细**（元素结构与 3.6 相同），
 页面切图 / 刷新 / 改阈值重算后可直接用它恢复底部 chips，不必再发额外请求。
 `analysis.ignored_ratio` = 忽略像素 / 图片总像素（与 ImageSummary.ignored_ratio 同口径）。
+`analysis.auto_excluded_pixels` = 纯黑 + 陆地等无效像素；其中陆地部分单独放在
+`analysis.land_pixels`（未套用遮罩时为 0），`analysis.land_masked` 表示是否套用。
+`width`/`height` 是**返回图尺寸**：小图会等比放大到 `config.TOOL_PREVIEW_MIN_SIDE`
+（≤ `TOOL_PREVIEW_MAX_SIDE`）便于悬停/点击，坐标仍按归一化值回传；
+`full_width`/`full_height` 始终是分析原图尺寸。
 
 注意：`ImageSummary.block_count` 在图片尚未被预览/点击过（色块尚未惰性计算）时为 `null`；
 点击色块时 `block.predicted` 也可能为 `null`（该色块已被标记忽略时）。
 
-### 3.5 点击色块
+### 3.5 点击色块 / 悬停查询
 `POST /tools/api/color_thresholds/block`
 ```json
-// 请求：x/y 为相对返回图（data URL 那张）的归一化坐标 0~1
-{"image_id": "a1b2c3d4e5f6", "x": 0.42, "y": 0.61, "ranges": null}
+// 请求：x/y 为相对返回图（data URL 那张）的归一化坐标 0~1；
+// preview=false 供鼠标悬停复用：只查色块信息，不重新渲染预览图
+{"image_id": "a1b2c3d4e5f6", "x": 0.42, "y": 0.61, "ranges": null, "preview": true}
 ```
 ```json
-// 响应
+// 响应（preview=true）
 {"success": true, "data": {
   "block": {
     "block_id": 37,
@@ -249,8 +266,15 @@ Base：`/tools/api/color_thresholds`
   "width": 1000, "height": 1000
 }}
 ```
-点击无效像素（纯黑自动排除 / 已被标为忽略 / 碎片块）时 `block` 为 `null`，
-并给出 `reason` 中文说明；HTTP 仍为 200。
+```json
+// 响应（preview=false，悬停查询）：不含 preview/width/height，响应通常 < 50 ms
+{"success": true, "data": {
+  "block": { "block_id": 37, "...": "与上面同结构" },
+  "reason": null
+}}
+```
+点击无效像素（纯黑 / 陆地遮罩区域 / 已被标为忽略 / 碎片块）时 `block` 为 `null`，
+并给出 `reason` 中文说明；HTTP 仍为 200。`preview=false` 时同样返回 `block=null` + `reason`。
 
 ### 3.6 保存 / 取消纠正
 `POST /tools/api/color_thresholds/corrections`
@@ -352,10 +376,14 @@ Base：`/tools/api/color_thresholds`
 - 导入图片落盘：`data/tool_uploads/color_thresholds/<id>/source.png`、
   `thumb.jpg`、`meta.json`、`corrections.json`、`blocks.png`、`block_stats.json`。
   其中 `source.png` 是分析输入（最长边 ≤1600 px 的 RGB）。
-- 分析区域：默认全图；`RGB 最大通道 ≤ 3` 的像素视为无效自动排除；
-  标为 `IGNORE` 的色块排除出指标；页面与接口仍可看到这些区域（分类图中渲染为深灰）。
+- 分析区域：默认全图，但会排除 `RGB 最大通道 ≤ 3` 的纯黑像素；与监控范围
+  （`config.TARGET_AREA`）长宽比一致的图片还会按 `config.GEOJSON_PATH` 生成
+  **陆地遮罩**，陆地不进入色块划分、分类与指标统计。标为 `IGNORE` 的色块同样排除出指标；
+  页面与接口仍可看到这些区域（分类图中渲染为深灰）。
+  遮罩口径记录在 `block_stats.json` 的 `mask` 字段里，口径变化时旧色块缓存自动失效重建。
 - 指标复用 `processor.classify_hsv` / `processor.render_classification_map` /
-  `processor.compute_ocean_color_metrics`，口径与生产一致（仅为无地理蒙版的全图口径）。
+  `processor.compute_ocean_color_metrics`，分析区域为去掉纯黑与陆地后的海洋区域，
+  与生产海洋蒙版口径一致。
 - 自动优化不得写入数据库；只有用户点「保存并立即生效」才通过既有
   `POST /tools/api/color_thresholds` 落库。
 - 单张图导入后在 1~2 s 内可预览；点击色块与保存纠正响应 < 500 ms（不含优化）；

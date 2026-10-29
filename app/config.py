@@ -221,6 +221,12 @@ TOOL_OPTIMIZE_MAX_SAMPLES_PER_BLOCK = 4000
 TOOL_OPTIMIZE_MIN_SAMPLES = 300
 # 预览图返回给页面的最长边（分类图会等比下采样，点击坐标按归一化值回传）
 TOOL_PREVIEW_MAX_SIDE = 1000
+# 小尺寸导入图在预览里的放大下限：161px 这类裁切图直接按原尺寸显示太小，
+# 等比放大到这个最长边（≤ TOOL_PREVIEW_MAX_SIDE）后再返回，便于悬停/点击色块。
+TOOL_PREVIEW_MIN_SIDE = 640
+# 导入图与监控范围（TARGET_AREA）长宽比的容许偏差；超出则不套用陆地遮罩，
+# 避免把不同取景范围的图按监控范围硬切（比例一致时按同一套经纬度 → 像素映射）。
+TOOL_GEO_MASK_ASPECT_TOLERANCE = 0.03
 # 缩略图最长边
 TOOL_THUMB_MAX_SIDE = 240
 

@@ -817,7 +817,7 @@
         .img-frame img {
             display: block;
             max-width: 100%;
-            max-height: min(58vh, 520px);
+            max-height: min(64vh, 640px);
             height: auto;
             border-radius: 8px;
             opacity: 0;
@@ -916,6 +916,46 @@
         .popover-note { margin: 0; font-size: 10.5px; color: var(--muted-2); line-height: 1.45; text-align: right; }
         .popover-note kbd { font-size: 9.5px; padding: 1px 4px; }
 
+        /* 悬停提示：跟随光标显示色块信息，不拦截鼠标事件 */
+        .block-tip {
+            position: absolute;
+            left: 0;
+            top: 0;
+            z-index: 6;
+            width: max-content;
+            max-width: min(268px, calc(100% - 12px));
+            padding: 9px 11px 10px;
+            border-radius: 10px;
+            background: rgba(16, 24, 32, .94);
+            color: #f4f8fb;
+            box-shadow: 0 10px 26px -12px rgba(8, 20, 32, .6);
+            font-size: 11.5px;
+            line-height: 1.5;
+            pointer-events: none;
+        }
+        .block-tip-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 3px;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .block-tip-title .tip-dot {
+            width: 8px; height: 8px;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: #9fb3c5;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, .12);
+        }
+        .block-tip-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; }
+        .block-tip-body .tip-key { color: #9fb3c5; }
+        .block-tip-body .tip-val { font-family: var(--mono); text-align: right; color: #fff; }
+        .block-tip-note { margin-top: 4px; font-size: 10.5px; color: #9fb3c5; }
+        .block-tip.is-reason .block-tip-title { font-family: var(--font); font-weight: 600; }
+        .block-tip.is-reason .block-tip-body { grid-template-columns: 1fr; color: #d8e2ec; }
+
         .correction-foot { display: flex; align-items: flex-start; gap: 10px; }
         .correction-foot .preview-hint { flex: 1 1 auto; }
         .legend {
@@ -933,6 +973,7 @@
         .legend .c-match { background: #20a464; }
         .legend .c-miss { background: #e8892b; }
         .legend .c-ignore { background: #8a939e; }
+        .legend .c-land { background: #2c2f36; }
 
         .chip-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; min-height: 26px; }
         .corr-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
@@ -1371,11 +1412,12 @@
             <div class="card-head">
                 <div class="card-heading">
                     <h2>2 · 色块纠正</h2>
-                    <p class="card-sub">点击右侧分类结果图中的色块，指定它真实的类别；标注会作为自动优化的训练样本。</p>
+                    <p class="card-sub">鼠标悬停查看色块信息，点击可指定它真实的类别；标注会作为自动优化的训练样本。与监控范围同比例的图片会自动套用陆地遮罩，陆地不参与分析。</p>
                 </div>
                 <div class="badges">
                     <span id="cur-image-badge" class="badge badge-mono">未选择图片</span>
                     <span id="blocks-badge" class="badge badge-mono">色块 —</span>
+                    <span id="land-badge" class="badge badge-mono" hidden>陆地已遮罩</span>
                     <span id="corrections-badge" class="badge badge-mono">已纠正 0</span>
                     <span id="ignored-badge" class="badge badge-mono">忽略占比 —</span>
                     <span id="accuracy-badge" class="badge badge-mono">纠正符合率 —</span>
@@ -1440,6 +1482,12 @@
                                 </p>
                             </div>
                         </div>
+
+                        <div class="block-tip" id="block-tip" role="tooltip" hidden>
+                            <div class="block-tip-title" id="tip-title"></div>
+                            <div class="block-tip-body" id="tip-body"></div>
+                            <div class="block-tip-note" id="tip-note"></div>
+                        </div>
                     </div>
                 </figure>
             </div>
@@ -1452,6 +1500,7 @@
                 <li><i class="c-match" aria-hidden="true"></i>绿色描边 = 当前判定与纠正一致</li>
                 <li><i class="c-miss" aria-hidden="true"></i>橙色描边 = 不一致（优化目标）</li>
                 <li><i class="c-ignore" aria-hidden="true"></i>灰色描边 = 已标记为忽略</li>
+                <li><i class="c-land" aria-hidden="true"></i>深灰 = 陆地/无效区域（已遮罩）</li>
             </ul>
 
             <div class="chip-row">
@@ -1648,6 +1697,11 @@
     var previewSeq = 0;
     var previewInflight = null;
     var debounceId = null;
+
+    var hoverTimer = null;                  // 悬停查询防抖
+    var hoverSeq = 0;                       // 悬停请求序号（丢弃过期响应）
+    var hoverPoint = { x: 0, y: 0 };        // 最近一次鼠标位置（提示框定位用）
+    var HOVER_DEBOUNCE_MS = 110;
 
     var toastTimer = null;
 
@@ -2849,6 +2903,7 @@
         if (!image) return false;
         var changed = imageId !== currentImageId;
         currentImageId = imageId;
+        hideBlockTip();
         if (changed) {
             selectedBlock = null;
             hidePopover();
@@ -2924,10 +2979,6 @@
         if (isNum(width) && isNum(height)) {
             previewState.width = width;
             previewState.height = height;
-            var dims = $('dims-badge');
-            dims.hidden = false;
-            dims.textContent = Math.round(width) + ' × ' + Math.round(height) + ' px';
-            dims.title = '返回图尺寸（最长边 ≤1000 px）';
         }
     }
 
@@ -2969,7 +3020,9 @@
             : 'ignoredRatio');
 
         setText('m-ocean-hint', isNum(analysisData.analyzed_pixels)
-            ? ('totalOceanPixels · 自动排除 ' + countText(analysisData.auto_excluded_pixels))
+            ? ('totalOceanPixels · 排除 ' + countText(analysisData.auto_excluded_pixels) +
+                (isNum(analysisData.land_pixels) && analysisData.land_pixels > 0
+                    ? '（陆地 ' + countText(analysisData.land_pixels) + '）' : ''))
             : 'totalOceanPixels');
     }
 
@@ -2979,6 +3032,13 @@
         if (isNum(data.full_width) && isNum(data.full_height)) {
             previewState.fullWidth = data.full_width;
             previewState.fullHeight = data.full_height;
+            // 预览图可能为便于观察被等比放大，尺寸徽标统一显示分析原图尺寸
+            var dims = $('dims-badge');
+            if (dims) {
+                dims.hidden = false;
+                dims.textContent = Math.round(data.full_width) + ' × ' + Math.round(data.full_height) + ' px';
+                dims.title = '分析图尺寸（原图像素；小图预览会等比放大显示）';
+            }
         }
         if (data.analysis) previewState.analysis = data.analysis;
         // 契约 3.4：preview 返回当前图片的完整 corrections，用于恢复底部 chips
@@ -3016,6 +3076,14 @@
 
         var ignored = ignoredRatio();
         setBadge('ignored-badge', '忽略占比 ' + (ignored === null ? '—' : percentText(ignored)));
+
+        var landBadge = $('land-badge');
+        if (landBadge) {
+            var landMasked = Boolean(analysis.land_masked === true ||
+                (image && image.land_masked === true));
+            landBadge.hidden = !landMasked;
+            landBadge.title = landMasked ? '已按监控范围遮罩陆地：不参与色块划分与指标统计' : '';
+        }
     }
 
     function ignoredRatio() {
@@ -3044,6 +3112,7 @@
     }
 
     function clearPreviewUi(message) {
+        hideBlockTip();
         setFrameEmpty('source', message || '还没有导入图片。');
         setFrameEmpty('classification', message || '还没有导入图片。');
         previewState = { width: null, height: null, fullWidth: null, fullHeight: null, analysis: null };
@@ -3057,6 +3126,7 @@
     }
 
     async function requestPreview() {
+        hideBlockTip();
         if (!currentImageId) {
             setHint('请先在「1 · 导入卫星图片」中导入并选择图片。', 'muted');
             return;
@@ -3121,6 +3191,7 @@
     }
 
     function schedulePreview() {
+        hideBlockTip();
         if (debounceId) clearTimeout(debounceId);
         debounceId = setTimeout(function () {
             debounceId = null;
@@ -3221,6 +3292,137 @@
         selectedBlock.matches = entry.matches;
     }
 
+    /* ---------------- 悬停提示（只读，不代替点击） ---------------- */
+    function hideBlockTip() {
+        if (hoverTimer) {
+            clearTimeout(hoverTimer);
+            hoverTimer = null;
+        }
+        hoverSeq++;
+        var tip = $('block-tip');
+        if (tip) {
+            tip.hidden = true;
+            tip.classList.remove('is-reason');
+        }
+    }
+
+    function fillBlockTip(block, reason) {
+        var tip = $('block-tip');
+        var titleEl = $('tip-title');
+        var bodyEl = $('tip-body');
+        var noteEl = $('tip-note');
+        if (!tip || !titleEl || !bodyEl || !noteEl) return;
+        titleEl.replaceChildren();
+        bodyEl.replaceChildren();
+        noteEl.textContent = '';
+        tip.classList.toggle('is-reason', !block);
+
+        if (!block) {
+            titleEl.textContent = '无法标注';
+            var reasonEl = document.createElement('span');
+            reasonEl.textContent = reason || '该位置没有可标注的色块';
+            bodyEl.appendChild(reasonEl);
+            return;
+        }
+
+        var dot = document.createElement('span');
+        dot.className = 'tip-dot';
+        dot.style.background = labelColor(block.label || block.predicted);
+        titleEl.appendChild(dot);
+        titleEl.appendChild(document.createTextNode('色块 #' + block.block_id));
+
+        function addRow(key, value) {
+            var k = document.createElement('span');
+            k.className = 'tip-key';
+            k.textContent = key;
+            var v = document.createElement('span');
+            v.className = 'tip-val';
+            v.textContent = value;
+            bodyEl.appendChild(k);
+            bodyEl.appendChild(v);
+        }
+
+        var ratioPart = isNum(block.pixel_ratio) ? ('（' + percentText(block.pixel_ratio, 2) + '）') : '';
+        addRow('像素', countText(block.pixel_count) + ratioPart);
+        addRow('HSV', Array.isArray(block.mean_hsv) ? block.mean_hsv.join(' / ') : '—');
+        addRow('RGB', Array.isArray(block.mean_rgb) ? block.mean_rgb.join(' / ') : '—');
+        addRow('判定', labelCn(block.predicted));
+        if (block.label) addRow('已纠正', block.label_label || labelCn(block.label));
+        noteEl.textContent = '点击该色块可' + (block.label ? '修改纠正' : '指定真实类别');
+    }
+
+    function positionBlockTip(clientX, clientY) {
+        var tip = $('block-tip');
+        if (!tip || tip.hidden) return;
+        var stage = tip.parentElement;
+        if (!stage) return;
+        var rect = stage.getBoundingClientRect();
+        var tipRect = tip.getBoundingClientRect();
+        var gap = 14;
+        var left = clientX - rect.left + gap;
+        var top = clientY - rect.top + gap + 2;
+        if (left + tipRect.width > rect.width - 6) {
+            left = clientX - rect.left - tipRect.width - gap;
+        }
+        if (top + tipRect.height > rect.height - 6) {
+            top = clientY - rect.top - tipRect.height - gap;
+        }
+        var maxLeft = Math.max(6, rect.width - tipRect.width - 6);
+        var maxTop = Math.max(6, rect.height - tipRect.height - 6);
+        tip.style.left = clamp(left, 6, maxLeft) + 'px';
+        tip.style.top = clamp(top, 6, maxTop) + 'px';
+    }
+
+    async function requestBlockTip(x, y, seq) {
+        var imageId = currentImageId;
+        if (!imageId) return;
+        try {
+            var data = await requestApi(API_BLOCK, {
+                method: 'POST',
+                json: {
+                    image_id: imageId,
+                    x: roundTo(x, 4),
+                    y: roundTo(y, 4),
+                    ranges: rangesForRequest(),
+                    preview: false
+                }
+            });
+            if (seq !== hoverSeq || imageId !== currentImageId) return;
+            fillBlockTip(data ? data.block : null, data ? data.reason : null);
+            var tip = $('block-tip');
+            if (!tip) return;
+            tip.hidden = false;
+            positionBlockTip(hoverPoint.x, hoverPoint.y);
+        } catch (error) {
+            if (seq !== hoverSeq) return;
+            hideBlockTip();
+        }
+    }
+
+    function scheduleBlockTip(clientX, clientY) {
+        if (!currentImageId || blockBusy || correcting) return;
+        var img = $('img-classification');
+        if (!img) return;
+        var rect = img.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        if (clientX < rect.left || clientX > rect.right ||
+            clientY < rect.top || clientY > rect.bottom) {
+            hideBlockTip();
+            return;
+        }
+        hoverPoint = { x: clientX, y: clientY };
+        var tip = $('block-tip');
+        if (tip && !tip.hidden) positionBlockTip(clientX, clientY);
+        var x = clamp((clientX - rect.left) / rect.width, 0, 1);
+        var y = clamp((clientY - rect.top) / rect.height, 0, 1);
+        if (hoverTimer) clearTimeout(hoverTimer);
+        var seq = ++hoverSeq;
+        hoverTimer = setTimeout(function () {
+            hoverTimer = null;
+            void requestBlockTip(x, y, seq);
+        }, HOVER_DEBOUNCE_MS);
+    }
+
     async function pickBlockAt(x, y) {
         if (!currentImageId) {
             setHint('请先在「1 · 导入卫星图片」中选择一张图片', 'warn');
@@ -3291,6 +3493,7 @@
         if (!currentImageId || correcting) return;
         var imageId = currentImageId;
         correcting = true;
+        hideBlockTip();
         syncCorrectionControls();
         renderPopover();
         setHint(label ? ('正在保存纠正：色块 #' + blockId + ' → ' + labelCn(label) + '…') : ('正在取消色块 #' + blockId + ' 的纠正…'), 'busy');
@@ -3805,8 +4008,14 @@
                 event.clientY < rect.top || event.clientY > rect.bottom) return;
             var x = (event.clientX - rect.left) / rect.width;
             var y = (event.clientY - rect.top) / rect.height;
+            hideBlockTip();
             void pickBlockAt(x, y);
         });
+        $('img-classification').addEventListener('mousemove', function (event) {
+            scheduleBlockTip(event.clientX, event.clientY);
+        });
+        $('img-classification').addEventListener('mouseleave', hideBlockTip);
+        $('img-classification').addEventListener('blur', hideBlockTip);
         $('img-classification').addEventListener('keydown', function (event) {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();

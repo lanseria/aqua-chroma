@@ -6,13 +6,15 @@
 -------------------------------------------
 1. **导入卫星图片**：单张、多张或 ZIP 批量。图片会等比缩放到最长边
    ``TOOL_UPLOAD_MAX_SIDE`` 后落盘为 ``source.png``（后续所有分析的实际输入），
-   并生成缩略图 ``thumb.jpg``。纯黑像素（max RGB <= 3）视为无效区域自动排除。
+   并生成缩略图 ``thumb.jpg``。纯黑像素（max RGB <= 3）视为无效区域自动排除；
+   与监控范围（``config.TARGET_AREA``）长宽比一致的图还会按 GeoJSON 生成
+   **陆地遮罩**，陆地不参与色块划分、分类与指标统计（与生产 pipeline 同一口径）。
 2. **色块划分**：在 Lab 颜色空间用 K-Means（K=TOOL_BLOCK_COUNT）聚类，
    再对每个聚类做连通域，得到一块块「颜色相近且空间连通」的色块并持久化
    （blocks.png + block_stats.json），页面点击时命中整块而不是单个像素。
 3. **分类预览**：复用 ``processor.classify_hsv`` / ``render_classification_map`` /
-   ``compute_ocean_color_metrics``，口径与生产一致（唯一的差别是这里没有地理
-   海洋蒙版，按「全图有效区域」分析）。分类图上叠加纠正描边：
+   ``compute_ocean_color_metrics``，口径与生产一致（差别是分析区域为「全图有效区域」，
+   即去掉纯黑与陆地后的海洋区域）。分类图上叠加纠正描边：
    绿色 = 当前参数判定与纠正一致，橙色 = 不一致，灰色 = 已标记忽略。
 4. **纠正**：用户在结果图上点色块，指定真实类别
    （CLOUD / BLUE_WATER / YELLOW_WATER / IGNORE），写入 ``corrections.json``。
@@ -28,6 +30,7 @@
 import base64
 import io
 import json
+import math
 import re
 import shutil
 import threading
@@ -70,10 +73,26 @@ MATCH_COLOR = (34, 197, 94)         # 纠正与当前判定一致
 MISMATCH_COLOR = (245, 158, 11)     # 纠正与当前判定不一致（优化目标）
 IGNORE_CONTOUR_COLOR = (148, 148, 148)
 
+# 陆地遮罩：导入图与监控范围长宽比一致时，按 TARGET_AREA 生成 GeoJSON 海洋蒙版，
+# 陆地（mask=0）不进入色块划分、不参与分类统计（与生产 pipeline 的口径一致）。
+# block_stats.json 里记录本版本号；口径变化时旧色块缓存自动失效重建。
+LAND_MASK_VERSION = "geo:monitor_area:1"
+NO_LAND_MASK_VERSION = "none"
+
 # 预处理缓存
 _prepared_lock = threading.RLock()
 _prepared_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 MAX_PREPARED_CACHE = 6
+
+# GeoJSON 海洋蒙版按画面尺寸缓存（同一尺寸的图片共用一张蒙版）
+_geo_mask_lock = threading.RLock()
+_geo_mask_cache: "OrderedDict[Tuple[int, int], np.ndarray]" = OrderedDict()
+MAX_GEO_MASK_CACHE = 4
+
+# 悬停查询用的分类结果缓存：key = (image_id, 阈值签名)
+_display_masks_lock = threading.RLock()
+_display_masks_cache: "OrderedDict[Tuple[str, str], Dict[str, np.ndarray]]" = OrderedDict()
+MAX_DISPLAY_MASKS_CACHE = 6
 
 # 自动优化：坐标下降可调参数与粗搜索网格
 _SEARCH_KEYS = ("cl_s", "cl_v0", "bl_h0", "bl_h1", "bl_s0", "bl_s1", "bl_v0", "bl_v1")
@@ -225,6 +244,50 @@ def _new_image_id() -> str:
     raise LabValidationError("生成图片 id 失败，请重试")
 
 
+def _target_area_aspect() -> float:
+    """监控范围（TARGET_AREA）在墨卡托投影下的宽高比（像素宽 / 像素高）。"""
+    bounds = config.TARGET_AREA
+    lon_span = float(bounds["east"]) - float(bounds["west"])
+    mercator_span = (geo_utils.mercator_y(float(bounds["north"]))
+                     - geo_utils.mercator_y(float(bounds["south"])))
+    return lon_span / (mercator_span * 180.0 / math.pi)
+
+
+def _mask_matches_target_area(width: int, height: int) -> bool:
+    """图片长宽比是否与监控范围一致（一致才套用陆地遮罩）。"""
+    if width <= 0 or height <= 0:
+        return False
+    expected = _target_area_aspect()
+    if expected <= 0:
+        return False
+    actual = width / float(height)
+    return abs(actual - expected) <= expected * float(config.TOOL_GEO_MASK_ASPECT_TOLERANCE)
+
+
+def _geo_ocean_mask(shape: Tuple[int, int]) -> Optional[np.ndarray]:
+    """按监控范围生成海洋蒙版（255=海洋，0=陆地），按画面尺寸缓存。"""
+    height, width = int(shape[0]), int(shape[1])
+    if not _mask_matches_target_area(width, height):
+        return None
+    key = (height, width)
+    with _geo_mask_lock:
+        cached = _geo_mask_cache.get(key)
+        if cached is not None:
+            _geo_mask_cache.move_to_end(key)
+            return cached
+    mask = geo_utils.create_ocean_mask(
+        image_shape=(height, width),
+        geojson_path=config.GEOJSON_PATH,
+        bounds=config.TARGET_AREA,
+        supersample=config.MASK_SUPERSAMPLE,
+    )
+    with _geo_mask_lock:
+        _geo_mask_cache[key] = mask
+        while len(_geo_mask_cache) > MAX_GEO_MASK_CACHE:
+            _geo_mask_cache.popitem(last=False)
+    return mask
+
+
 # ---------------------------------------------------------------------------
 #  图片摘要 / 列表
 # ---------------------------------------------------------------------------
@@ -248,6 +311,10 @@ def _summary(image_id: str, meta: Dict[str, Any], corrections: List[Dict[str, An
              block_stats: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     width = int(meta.get("width") or 0)
     height = int(meta.get("height") or 0)
+    land_masked = meta.get("land_masked")
+    if not isinstance(land_masked, bool):
+        # 兼容旧版本导入、meta 里还没有该字段的图片
+        land_masked = _mask_matches_target_area(width, height)
     return {
         "id": image_id,
         "name": str(meta.get("name") or image_id),
@@ -259,6 +326,7 @@ def _summary(image_id: str, meta: Dict[str, Any], corrections: List[Dict[str, An
         "correction_count": len(corrections),
         "block_count": int(block_stats["block_count"]) if block_stats else None,
         "ignored_ratio": _ignored_ratio(block_stats, corrections, width, height),
+        "land_masked": bool(land_masked),
     }
 
 
@@ -335,6 +403,8 @@ def _import_image_bytes(raw: bytes, name: str, source: str) -> Dict[str, Any]:
             "height": int(image.height),
             "original_width": int(width),
             "original_height": int(height),
+            # 导入时就按长宽比判定是否套用陆地遮罩，列表接口无需重新读像素
+            "land_masked": bool(_mask_matches_target_area(image.width, image.height)),
             "created_at": _iso(),
         }
         _atomic_write_text(directory / "meta.json",
@@ -481,7 +551,7 @@ def clear_images() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _load_block_stats(image_id: str) -> Optional[Dict[str, Any]]:
-    """读取 block_stats.json，返回 {"block_count", "blocks": {id: {...}}}；不存在返回 None。"""
+    """读取 block_stats.json，返回 {"mask", "block_count", "blocks": {id: {...}}}；不存在返回 None。"""
     raw = _read_json(_image_dir(image_id) / "block_stats.json", None)
     if not isinstance(raw, dict):
         return None
@@ -502,13 +572,18 @@ def _load_block_stats(image_id: str) -> Optional[Dict[str, Any]]:
             "mean_hsv": [int(v) for v in item.get("mean_hsv", [0, 0, 0])],
             "mean_rgb": [int(v) for v in item.get("mean_rgb", [0, 0, 0])],
         }
-    return {"block_count": int(raw.get("block_count", len(blocks))), "blocks": blocks}
+    return {
+        "mask": raw.get("mask"),
+        "block_count": int(raw.get("block_count", len(blocks))),
+        "blocks": blocks,
+    }
 
 
 def _save_block_stats(image_id: str, block_map: np.ndarray,
-                      block_stats: Dict[str, Any]) -> None:
+                      block_stats: Dict[str, Any], mask_version: str) -> None:
     directory = _image_dir(image_id)
     payload = {
+        "mask": mask_version,
         "block_count": int(block_stats["block_count"]),
         "blocks": list(block_stats["blocks"].values()),
     }
@@ -676,15 +751,30 @@ def _prepare(image_id: str) -> Dict[str, Any]:
     # 这样导入 03_ocean_only.png 时与生产的海洋蒙版口径自然对齐。
     valid = rgb.max(axis=2) > 3
 
+    # 陆地遮罩：与监控范围同比例的图（生产裁剪图 / 对应截图）按经纬度生成海洋蒙版，
+    # 陆地不参与色块划分与指标统计；比例不一致的图不硬套，避免把画面切错。
+    land_masked = meta.get("land_masked")
+    if not isinstance(land_masked, bool):
+        land_masked = _mask_matches_target_area(rgb.shape[1], rgb.shape[0])
+    geo_mask = _geo_ocean_mask(rgb.shape[:2]) if land_masked else None
+    if geo_mask is not None:
+        valid = valid & (geo_mask > 0)
+    mask_version = LAND_MASK_VERSION if geo_mask is not None else NO_LAND_MASK_VERSION
+
     block_stats = _load_block_stats(image_id)
+    # 遮罩口径变化（例如旧版本缓存未去陆地）时重建色块
+    if block_stats is not None and block_stats.get("mask") != mask_version:
+        block_stats = None
     block_map = _load_block_map(image_id, valid.shape) if block_stats else None
     if block_stats is None or block_map is None:
         block_map, block_stats = _build_blocks(rgb, hsv, valid)
-        _save_block_stats(image_id, block_map, block_stats)
+        _save_block_stats(image_id, block_map, block_stats, mask_version)
 
-    source_preview = _downscale(rgb, int(config.TOOL_PREVIEW_MAX_SIDE))
+    source_preview = _fit_preview(rgb, int(config.TOOL_PREVIEW_MAX_SIDE),
+                                  int(config.TOOL_PREVIEW_MIN_SIDE),
+                                  cv2.INTER_LANCZOS4)
     print(f"[ColorLab] 已加载图片 {image_id}（{rgb.shape[1]}×{rgb.shape[0]}，"
-          f"{block_stats['block_count']} 个色块）")
+          f"{block_stats['block_count']} 个色块，陆地遮罩：{'开' if geo_mask is not None else '关'}）")
     return {
         "id": image_id,
         "meta": meta,
@@ -692,6 +782,8 @@ def _prepare(image_id: str) -> Dict[str, Any]:
         "hsv": hsv,
         "valid": valid,
         "valid_mask": (valid.astype(np.uint8) * 255),
+        "geo_mask": geo_mask,
+        "land_masked": geo_mask is not None,
         "block_map": block_map,
         "block_stats": block_stats,
         "source_preview": _png_data_url(source_preview),
@@ -728,6 +820,53 @@ def _downscale(rgb: np.ndarray, max_side: int) -> np.ndarray:
         (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
         interpolation=cv2.INTER_AREA,
     )
+
+
+def _fit_preview(rgb: np.ndarray, max_side: int, min_side: int,
+                 interpolation: int = cv2.INTER_LANCZOS4) -> np.ndarray:
+    """按最长边上下限调整预览图：大图缩小、小图放大，保证页面上的可点击尺寸。"""
+    preview = _downscale(rgb, max_side)
+    height, width = preview.shape[:2]
+    longest = max(height, width)
+    if min_side > 0 and longest < min_side:
+        scale = min_side / float(longest)
+        preview = cv2.resize(
+            preview,
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            interpolation=interpolation,
+        )
+    return preview
+
+
+def _ranges_signature(ranges: Dict[str, Any]) -> str:
+    """阈值签名：用于悬停查询的分类结果缓存。"""
+    parts: List[str] = []
+    for class_key in ("CLOUD", "BLUE_WATER"):
+        parts.append(class_key)
+        parts.append(",".join(str(int(value)) for value in ranges[class_key]["lower"]))
+        parts.append(",".join(str(int(value)) for value in ranges[class_key]["upper"]))
+    return "|".join(parts)
+
+
+def _display_class_masks(prepared: Dict[str, Any],
+                         ranges: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """
+    在「有效区域（含陆地遮罩）」上按给定阈值分类，供点击 / 悬停判定色块类别。
+
+    结果按 (image_id, 阈值签名) 缓存，避免鼠标悬停时反复全图分类。
+    """
+    key = (str(prepared["id"]), _ranges_signature(ranges))
+    with _display_masks_lock:
+        cached = _display_masks_cache.get(key)
+        if cached is not None:
+            _display_masks_cache.move_to_end(key)
+            return cached
+    masks = processor.classify_hsv(prepared["hsv"], prepared["valid_mask"], ranges)
+    with _display_masks_lock:
+        _display_masks_cache[key] = masks
+        while len(_display_masks_cache) > MAX_DISPLAY_MASKS_CACHE:
+            _display_masks_cache.popitem(last=False)
+    return masks
 
 
 def _png_data_url(rgb: np.ndarray) -> str:
@@ -769,17 +908,50 @@ def _predicted_class(class_masks: Dict[str, np.ndarray], mask: np.ndarray) -> Op
     return best_key if best_count > 0 else None
 
 
-def _draw_corrections(render: np.ndarray, prepared: Dict[str, Any],
-                      class_masks: Dict[str, np.ndarray],
-                      corrections: List[Dict[str, Any]],
-                      selection: Optional[Dict[str, Any]]) -> None:
-    """在分类图上叠加纠正描边与类别角标（原地修改）。"""
-    block_map = prepared["block_map"]
-    texts: List[Tuple[int, int, str, Tuple[int, int, int]]] = []
+def _correction_styles(prepared: Dict[str, Any],
+                       class_masks: Dict[str, np.ndarray],
+                       corrections: List[Dict[str, Any]]
+                       ) -> List[Tuple[int, Tuple[int, int, int], str]]:
+    """
+    按全分辨率像素统计每个纠正色块的描边颜色与角标文字。
 
+    返回 [(block_id, color, badge_cn), ...]；绿色 = 纠正与当前判定一致，
+    橙色 = 不一致，灰色 = 已标记忽略。
+    """
+    block_map = prepared["block_map"]
+    styles: List[Tuple[int, Tuple[int, int, int], str]] = []
     for corr in corrections:
         block_id = int(corr["block_id"])
         label = str(corr["label"])
+        mask = _block_mask(block_map, block_id)
+        total = int(np.count_nonzero(mask))
+        if total == 0:
+            continue
+        if label == IGNORE_LABEL:
+            color = IGNORE_CONTOUR_COLOR
+        else:
+            hit = int(np.count_nonzero(class_masks[label][mask])) if label in class_masks else 0
+            color = MATCH_COLOR if hit * 2 >= total else MISMATCH_COLOR
+        styles.append((block_id, color, BADGE_CN.get(label, "?")))
+    return styles
+
+
+def _draw_corrections(render: np.ndarray, block_map: np.ndarray,
+                      styles: List[Tuple[int, Tuple[int, int, int], str]],
+                      selection: Optional[Dict[str, Any]],
+                      scale: float = 1.0) -> None:
+    """
+    在预览分辨率的分类图上叠加纠正描边与类别角标（原地修改）。
+
+    描边直接画在预览图上（而不是画完再缩放），小图放大预览时角标/线宽不会跟着
+    被放大成马赛克；block_map 需与 render 同尺寸。
+    """
+    texts: List[Tuple[int, int, str, Tuple[int, int, int]]] = []
+    ratio = min(max(scale, 0.15), 1.5)
+    halo = max(1, int(round(4 * ratio)))
+    line = max(1, int(round(2 * ratio)))
+
+    for block_id, color, badge in styles:
         mask = _block_mask(block_map, block_id)
         if not np.any(mask):
             continue
@@ -788,16 +960,8 @@ def _draw_corrections(render: np.ndarray, prepared: Dict[str, Any],
         if not contours:
             continue
 
-        if label == IGNORE_LABEL:
-            color = IGNORE_CONTOUR_COLOR
-        else:
-            total = int(np.count_nonzero(mask))
-            hit = int(np.count_nonzero(class_masks[label][mask])) if label in class_masks else 0
-            matches = total > 0 and hit * 2 >= total
-            color = MATCH_COLOR if matches else MISMATCH_COLOR
-
-        cv2.drawContours(render, contours, -1, (0, 0, 0), 4, lineType=cv2.LINE_AA)
-        cv2.drawContours(render, contours, -1, color, 2, lineType=cv2.LINE_AA)
+        cv2.drawContours(render, contours, -1, (0, 0, 0), halo, lineType=cv2.LINE_AA)
+        cv2.drawContours(render, contours, -1, color, line, lineType=cv2.LINE_AA)
 
         contour = max(contours, key=cv2.contourArea)
         moments = cv2.moments(contour)
@@ -807,7 +971,7 @@ def _draw_corrections(render: np.ndarray, prepared: Dict[str, Any],
         else:
             x, y, _, _ = cv2.boundingRect(contour)
             cx, cy = int(x), int(y)
-        texts.append((cx, cy, BADGE_CN.get(label, "?"), color))
+        texts.append((cx, cy, badge, color))
 
     if selection and selection.get("block_id") is not None:
         selection_mask = _block_mask(block_map, int(selection["block_id"]))
@@ -818,7 +982,7 @@ def _draw_corrections(render: np.ndarray, prepared: Dict[str, Any],
             contours, _ = cv2.findContours(selection_mask.astype(np.uint8),
                                            cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
-                cv2.drawContours(render, contours, -1, (255, 255, 255), 4,
+                cv2.drawContours(render, contours, -1, (255, 255, 255), halo,
                                  lineType=cv2.LINE_AA)
                 contour = max(contours, key=cv2.contourArea)
                 moments = cv2.moments(contour)
@@ -833,7 +997,7 @@ def _draw_corrections(render: np.ndarray, prepared: Dict[str, Any],
     if not texts:
         return
     height, width = render.shape[:2]
-    font = _font_for_badge(max(14, int(round(min(height, width) * 0.022))))
+    font = _font_for_badge(max(12, int(round(min(height, width) * 0.022))))
     pil_image = Image.fromarray(render)
     draw = ImageDraw.Draw(pil_image)
     for cx, cy, text, color in texts:
@@ -951,11 +1115,29 @@ def _build_preview_payload(prepared: Dict[str, Any], ranges: Dict[str, Any],
     if np.any(invalid):
         render[invalid] = INVALID_COLOR
 
-    if show_corrections:
-        _draw_corrections(render, prepared, class_masks, corrections, selection)
-
-    preview_rgb = _downscale(render, int(config.TOOL_PREVIEW_MAX_SIDE))
+    # 小图放大到 TOOL_PREVIEW_MIN_SIDE，避免 161px 的裁切图在页面上过小、难以悬停/点击。
+    # 描边/角标在缩放后的预览图上绘制，避免小图放大时文字与线宽被一起放大成马赛克。
+    preview_rgb = _fit_preview(render, int(config.TOOL_PREVIEW_MAX_SIDE),
+                               int(config.TOOL_PREVIEW_MIN_SIDE),
+                               cv2.INTER_NEAREST)
     preview_height, preview_width = preview_rgb.shape[:2]
+
+    if show_corrections:
+        scale = preview_width / float(max(1, width))
+        if (preview_width, preview_height) == (width, height):
+            block_map_preview = prepared["block_map"]
+        else:
+            block_map_preview = cv2.resize(
+                prepared["block_map"], (preview_width, preview_height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        _draw_corrections(
+            preview_rgb,
+            block_map_preview,
+            _correction_styles(prepared, class_masks, corrections),
+            selection,
+            scale,
+        )
 
     metrics = processor.compute_ocean_color_metrics(
         image_array=prepared["rgb"],
@@ -967,6 +1149,8 @@ def _build_preview_payload(prepared: Dict[str, Any], ranges: Dict[str, Any],
 
     total_pixels = int(height * width)
     ignored_pixels = int(np.count_nonzero(ignore))
+    geo_mask = prepared.get("geo_mask")
+    land_pixels = int(np.count_nonzero(geo_mask == 0)) if geo_mask is not None else 0
     analysis = {
         "analyzed_pixels": int(np.count_nonzero(analysis_mask)),
         "auto_excluded_pixels": int(np.count_nonzero(~prepared["valid"])),
@@ -975,6 +1159,8 @@ def _build_preview_payload(prepared: Dict[str, Any], ranges: Dict[str, Any],
         "total_pixels": total_pixels,
         "block_count": int(prepared["block_stats"]["block_count"]),
         "correction_accuracy": _correction_accuracy(prepared, corrections, class_masks),
+        "land_masked": bool(prepared.get("land_masked")),
+        "land_pixels": land_pixels,
     }
 
     return {
@@ -1053,11 +1239,8 @@ def _coerce_block_id(value: Any) -> int:
     return int(value)
 
 
-def pick_block(image_id: str, x: Any, y: Any,
-               ranges: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    点击坐标（相对预览图的归一化 0~1）命中整块色块，返回色块信息与高亮预览。
-    """
+def _normalize_xy(x: Any, y: Any) -> Tuple[float, float]:
+    """校验点击坐标（相对预览图的归一化 0~1）。"""
     try:
         nx = float(x)
         ny = float(y)
@@ -1065,15 +1248,82 @@ def pick_block(image_id: str, x: Any, y: Any,
         raise LabValidationError(f"点击坐标必须是 0~1 的数字，实际为 ({x!r}, {y!r})") from exc
     if not (0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0):
         raise LabValidationError(f"点击坐标必须归一化到 0~1，实际为 ({nx}, {ny})")
+    return nx, ny
+
+
+def _hit_block(prepared: Dict[str, Any], nx: float, ny: float,
+               ignored_ids: set) -> Tuple[Optional[int], Optional[str]]:
+    """归一化坐标 → 命中的色块 id；无效区域 / 忽略块 / 碎片块返回中文原因。"""
+    block_map = prepared["block_map"]
+    height, width = block_map.shape
+    px = min(width - 1, max(0, int(round(nx * (width - 1)))))
+    py = min(height - 1, max(0, int(round(ny * (height - 1)))))
+
+    if not prepared["valid"][py, px]:
+        return None, "该像素属于陆地或纯黑无效区域（已自动排除），请点击海洋区域"
+    block_id = int(block_map[py, px])
+    if block_id <= 0 or block_id not in (prepared["block_stats"].get("blocks") or {}):
+        return None, "该像素属于过小的色块碎片，请点击相邻的较大色块"
+    if block_id in ignored_ids:
+        return None, "该色块已被标记为忽略，可在纠正列表中点 × 撤销"
+    return block_id, None
+
+
+def _block_payload(prepared: Dict[str, Any], block_id: int,
+                   class_masks: Dict[str, np.ndarray],
+                   corrections: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """色块详情（点击浮层与悬停提示共用同一结构）。"""
+    block_info = (prepared["block_stats"].get("blocks") or {})[block_id]
+    mask = _block_mask(prepared["block_map"], block_id)
+    predicted = _predicted_class(class_masks, mask)
+    existing = next((item for item in corrections
+                     if int(item["block_id"]) == block_id), None)
+    label = str(existing["label"]) if existing else None
+
+    height, width = prepared["block_map"].shape
+    total_pixels = max(1, height * width)
+    return {
+        "block_id": block_id,
+        "pixel_count": int(block_info["pixel_count"]),
+        "pixel_ratio": round(int(block_info["pixel_count"]) / float(total_pixels), 6),
+        "bbox": list(block_info["bbox"]),
+        "mean_hsv": list(block_info["mean_hsv"]),
+        "mean_rgb": list(block_info["mean_rgb"]),
+        "predicted": predicted,
+        "predicted_label": CLASS_LABELS.get(predicted) if predicted else None,
+        "label": label,
+        "label_label": LABELS.get(label) if label else None,
+    }
+
+
+def pick_block(image_id: str, x: Any, y: Any,
+               ranges: Optional[Dict[str, Any]] = None,
+               include_preview: bool = True) -> Dict[str, Any]:
+    """
+    点击坐标（相对预览图的归一化 0~1）命中整块色块。
+
+    include_preview=False 时只返回色块信息（供鼠标悬停提示复用），
+    不重新渲染分类图，响应更快。
+    """
+    nx, ny = _normalize_xy(x, y)
+    prepared = _get_prepared(image_id)
+
+    if not include_preview:
+        corrections = _read_corrections(image_id)
+        ignored_ids = {int(item["block_id"]) for item in corrections
+                       if item.get("label") == IGNORE_LABEL}
+        block_id, reason = _hit_block(prepared, nx, ny, ignored_ids)
+        if block_id is None:
+            return {"block": None, "reason": reason}
+        masks = _display_class_masks(prepared, _resolve_ranges(ranges))
+        return {"block": _block_payload(prepared, block_id, masks, corrections),
+                "reason": None}
 
     # 先装配状态（含当前阈值的分类结果），点击命中后再生成一次带高亮的预览
     state = _state(image_id, ranges)
     prepared = state["prepared"]
-    block_map = prepared["block_map"]
-    height, width = block_map.shape
-
-    px = min(width - 1, max(0, int(round(nx * (width - 1)))))
-    py = min(height - 1, max(0, int(round(ny * (height - 1)))))
+    ignored_ids = {int(item["block_id"]) for item in state["corrections"]
+                   if item.get("label") == IGNORE_LABEL}
 
     def _payload(selection: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return _build_preview_payload(
@@ -1088,7 +1338,8 @@ def pick_block(image_id: str, x: Any, y: Any,
             started=state["started"],
         )
 
-    def _empty(reason: str) -> Dict[str, Any]:
+    block_id, reason = _hit_block(prepared, nx, ny, ignored_ids)
+    if block_id is None:
         payload = _payload(None)
         return {
             "block": None,
@@ -1098,40 +1349,11 @@ def pick_block(image_id: str, x: Any, y: Any,
             "height": payload["height"],
         }
 
-    if not prepared["valid"][py, px]:
-        return _empty("该像素属于纯黑无效区域（已自动排除），请点击其他位置")
-    if state["ignore"][py, px] > 0:
-        return _empty("该色块已被标记为忽略，可在纠正列表中点 × 撤销")
-
-    block_id = int(block_map[py, px])
-    block_info = (prepared["block_stats"].get("blocks") or {}).get(block_id)
-    if block_id <= 0 or block_info is None:
-        return _empty("该像素属于过小的色块碎片，请点击相邻的较大色块")
-
-    mask = _block_mask(block_map, block_id)
     # 预测用「有效区域全图」的分类结果，保证被判为忽略的色块也能看到当前阈值下会判成什么
-    display_masks = processor.classify_hsv(prepared["hsv"], prepared["valid_mask"],
-                                           state["ranges"])
-    predicted = _predicted_class(display_masks, mask)
-    existing = next((c for c in state["corrections"] if c["block_id"] == block_id), None)
-    label = str(existing["label"]) if existing else None
-
-    total_pixels = max(1, height * width)
+    masks = _display_class_masks(prepared, state["ranges"])
     payload = _payload({"block_id": block_id})
-
     return {
-        "block": {
-            "block_id": block_id,
-            "pixel_count": int(block_info["pixel_count"]),
-            "pixel_ratio": round(int(block_info["pixel_count"]) / float(total_pixels), 6),
-            "bbox": list(block_info["bbox"]),
-            "mean_hsv": list(block_info["mean_hsv"]),
-            "mean_rgb": list(block_info["mean_rgb"]),
-            "predicted": predicted,
-            "predicted_label": CLASS_LABELS.get(predicted) if predicted else None,
-            "label": label,
-            "label_label": LABELS.get(label) if label else None,
-        },
+        "block": _block_payload(prepared, block_id, masks, state["corrections"]),
         "preview": payload["image"],
         "width": payload["width"],
         "height": payload["height"],

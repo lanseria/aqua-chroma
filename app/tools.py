@@ -59,6 +59,8 @@ class LabBlockRequest(BaseModel):
     x: float
     y: float
     ranges: Optional[Dict[str, Any]] = None
+    # 悬停查询传 false：只返回色块信息，不重新渲染分类图（响应更快）
+    preview: bool = True
 
 
 class LabCorrectionRequest(BaseModel):
@@ -306,9 +308,14 @@ def api_lab_preview(payload: LabPreviewRequest):
 
 @router.post("/api/color_thresholds/block")
 def api_lab_pick_block(payload: LabBlockRequest):
-    """点击色块：x/y 为相对预览图的归一化坐标（0~1），返回整块色块信息与高亮预览。"""
+    """
+    点击色块：x/y 为相对预览图的归一化坐标（0~1），返回整块色块信息与高亮预览。
+
+    页面鼠标悬停时用 preview=false 走同一接口，只取色块信息（不生成预览图）。
+    """
     try:
-        data = color_lab.pick_block(payload.image_id, payload.x, payload.y, payload.ranges)
+        data = color_lab.pick_block(payload.image_id, payload.x, payload.y,
+                                    payload.ranges, include_preview=payload.preview)
     except Exception as exc:  # noqa: BLE001
         return _lab_error_response(exc)
     return {"success": True, "data": data}

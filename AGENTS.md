@@ -31,7 +31,7 @@ uv sync --locked
 关键模块职责：
 - **config.py** — 基础设施配置中心：数据源选择（环境变量 `ACTIVE_DATA_SOURCE`）、分类图着色（`HSV_CLASSIFICATION_RENDER`）、地理范围、调度参数、地图标注样式与城市点位（`CITY_POINTS`）、调优工作台上传/色块/优化参数（`TOOL_*`）。**HSV 颜色阈值不再是权威配置**：`DEFAULT_COLOR_CLASSIFICATION_HSV_RANGES` 仅为数据库无记录时的兜底默认值
 - **settings_store.py** — 运行时设置存储：HSV 阈值持久化在 `app_settings` 表（key=`hsv_color_ranges`），带中文校验、约 1 秒 TTL 缓存与保存即失效；`processor` 每次分析都从它取生效阈值，因此页面保存后无需重启即生效
-- **color_lab.py** — 颜色阈值智能调优后端（`/tools/color_thresholds`）：导入卫星图片（单张/ZIP 批量，原始二进制请求体；等比缩放最长边 1600px、纯黑像素视为无效）→ Lab 空间 K-Means + 连通域切「色块」（`blocks.png`/`block_stats.json`）→ 复用 `processor` 做分类渲染/指标 → 点击色块写入用户纠正（云层/蓝海/黄海/忽略）→ 坐标下降自动搜索更优 HSV 阈值（目标 = 用户标注准确率 + 未标注区域保真度各 50%，只返回建议不落库）。数据存 `data/tool_uploads/color_thresholds/<image_id>/`，不依赖数据库；设计与接口见 `docs/color-thresholds-lab.md`
+- **color_lab.py** — 颜色阈值智能调优后端（`/tools/color_thresholds`）：导入卫星图片（单张/ZIP 批量，原始二进制请求体；等比缩放最长边 1600px、纯黑像素视为无效；与监控范围同比例时按 GeoJSON 套用陆地遮罩）→ Lab 空间 K-Means + 连通域切「色块」（`blocks.png`/`block_stats.json`）→ 复用 `processor` 做分类渲染/指标 → 悬停查色块详情、点击色块写入用户纠正（云层/蓝海/黄海/忽略）→ 坐标下降自动搜索更优 HSV 阈值（目标 = 用户标注准确率 + 未标注区域保真度各 50%，只返回建议不落库）。数据存 `data/tool_uploads/color_thresholds/<image_id>/`，不依赖数据库；设计与接口见 `docs/color-thresholds-lab.md`
 - **downloader.py** — 瓦片坐标计算、多源卫星图像下载与拼接裁剪
 - **pipeline.py** — 图像预处理编排（缩放→CLAHE色彩均衡→海洋蒙版→颜色分析，另生成带地图标注的 `01_input_annotated.png` 可视化图），被主任务和调试工具共享
 - **processor.py** — 日夜判断（ephem 天文算法）、HSV 阈值颜色分类（阈值来自 `settings_store`，可传 override）、能见度估算（`estimate_visibility`：在无云水面上用暗通道亮度/局部RMS对比度/边缘密度三项浑浊度代理量按 Koschmieder 定律折算公里数；无云占比不足时按比例混入含云顶的全场景测量，云越厚能见度自然越低，不做硬截断记 0）
@@ -61,6 +61,7 @@ uv sync --locked
 - 数据库 Schema 变更时需同步编写 `scripts/migrate_*.py` 幂等迁移脚本（参考 `migrate_add_visibility_columns.py`），存量数据无法回填的列保持 NULL
 - HSV 颜色阈值是运行时配置（`app_settings` 表中的 JSON），不要写进 `.env` 或硬编码进 `config.py`；新增可调参数时按 `settings_store.py` 的模式扩展（校验 + 持久化 + 缓存失效），调试用临时阈值通过 `hsv_ranges_override` 参数传入，落到生产上的改动一律走页面/API 保存
 - 调优工作台的导入图片与纠正数据都在 `data/tool_uploads/color_thresholds/<image_id>/`（`source.png` 分析输入、`thumb.jpg`、`meta.json`、`corrections.json`、`blocks.png`、`block_stats.json`），不写数据库；`/data` 已挂载为静态目录，页面缩略图直接走 `/data/...` URL
+- 工作台的陆地遮罩按 `config.TARGET_AREA` 生成并缓存：导入图长宽比在 `TOOL_GEO_MASK_ASPECT_TOLERANCE` 内才套用，遮罩口径版本记录在 `block_stats.json` 的 `mask` 字段（口径变化时色块自动重建）；预览图会把小图放大到 `TOOL_PREVIEW_MIN_SIDE`，页面鼠标悬停走 `/tools/api/color_thresholds/block`（`preview=false`）只取色块信息
 - 自动优化只返回建议值，绝不自动落库；保存阈值仍然只走 `POST /tools/api/color_thresholds`（用户点「保存并立即生效」）
 - 工作台导入接口刻意使用**原始二进制请求体**（`?filename=`），不引入 python-multipart；ZIP 批量导入有条目数/解压总量/单张大小上限（见 `config.TOOL_*`）
 - Docker 部署的图片挂载：`TILES_HOST_PATH` 必须写在 compose 项目级 `.env` 或 shell 环境变量（`env_file: .env.production` 里的同名变量不参与卷替换，会静默回落命名卷）；启动日志的 `[Storage]` 行与 `GET /api/debug/storage` 可查看输出目录绝对路径、挂载来源、可写性与已有时间戳目录数
